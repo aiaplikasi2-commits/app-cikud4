@@ -1,0 +1,6 @@
+{
+  "name": "Aplikasi Administrasi Sekolah",
+  "description": "Aplikasi PWA Administrasi Sekolah yang responsif untuk perangkat Android, tablet, laptop, dan komputer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

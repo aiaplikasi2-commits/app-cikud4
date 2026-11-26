@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Aplikasi Administrasi Sekolah",
+  "short_name": "AdminSekolah",
+  "description": "Aplikasi PWA Administrasi Sekolah untuk pengelolaan persuratan, siswa, guru, tendik, dan presensi harian.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F4F7FC",
+  "theme_color": "#F4F7FC",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/aistudio/logo_1128ead8.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

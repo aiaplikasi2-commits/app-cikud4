@@ -1,0 +1,305 @@
+{
+  "entities": {
+    "School": {
+      "title": "School",
+      "description": "Identitas sekolah, kepala sekolah, operator, dan metadata konfigurasi utama",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "schoolName": { "type": "string", "maxLength": 200 },
+        "city": { "type": "string", "maxLength": 120 },
+        "department": { "type": "string", "maxLength": 200 },
+        "academicYear": { "type": "string", "maxLength": 40 },
+        "principalName": { "type": "string", "maxLength": 150 },
+        "principalPosition": { "type": "string", "maxLength": 150 },
+        "principalNip": { "type": "string", "maxLength": 40 },
+        "operatorName": { "type": "string", "maxLength": 150 },
+        "operatorPosition": { "type": "string", "maxLength": 150 },
+        "operatorNip": { "type": "string", "maxLength": 40 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "schoolName",
+        "city",
+        "department",
+        "academicYear",
+        "principalName",
+        "principalPosition",
+        "principalNip",
+        "operatorName",
+        "operatorPosition",
+        "operatorNip",
+        "logoUrl",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SchoolAsset": {
+      "title": "SchoolAsset",
+      "description": "Berkas gambar resmi sekolah (logo, kop surat, tanda tangan, stempel)",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "slot": { "type": "string", "enum": ["logo", "kop", "ttd", "stempel"], "maxLength": 20 },
+        "filename": { "type": "string", "maxLength": 200 },
+        "originalName": { "type": "string", "maxLength": 200 },
+        "mimeType": { "type": "string", "maxLength": 60 },
+        "size": { "type": "number" },
+        "dataUrl": { "type": "string", "maxLength": 950000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "slot",
+        "filename",
+        "originalName",
+        "mimeType",
+        "size",
+        "dataUrl",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Akun login Operator dan Guru yang tersinkronisasi online",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "nip": { "type": "string", "maxLength": 40 },
+        "username": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["OPERATOR", "GURU"], "maxLength": 20 },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"], "maxLength": 20 },
+        "mustChangePassword": { "type": "boolean" },
+        "teacherRecordId": { "type": "string", "maxLength": 128 },
+        "assignedClass": { "type": "string", "maxLength": 80 },
+        "passwordSalt": { "type": "string", "maxLength": 128 },
+        "passwordHash": { "type": "string", "maxLength": 256 },
+        "deactivatedAt": { "type": "string", "maxLength": 64 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "fullName",
+        "nip",
+        "username",
+        "email",
+        "role",
+        "status",
+        "mustChangePassword",
+        "teacherRecordId",
+        "assignedClass",
+        "passwordSalt",
+        "passwordHash",
+        "deactivatedAt",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Data induk peserta didik hasil import Dapodik maupun input manual",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "no": { "type": "string", "maxLength": 20 },
+        "nama": { "type": "string", "maxLength": 200 },
+        "nipd": { "type": "string", "maxLength": 40 },
+        "jk": { "type": "string", "maxLength": 10 },
+        "nisn": { "type": "string", "maxLength": 40 },
+        "tempatLahir": { "type": "string", "maxLength": 120 },
+        "tanggalLahir": { "type": "string", "maxLength": 40 },
+        "rombelSaatIni": { "type": "string", "maxLength": 80 },
+        "statusData": { "type": "string", "enum": ["LENGKAP", "PERLU_PERIKSA"], "maxLength": 30 },
+        "details": { "type": "object" },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "no",
+        "nama",
+        "nipd",
+        "jk",
+        "nisn",
+        "tempatLahir",
+        "tanggalLahir",
+        "rombelSaatIni",
+        "statusData",
+        "details",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Data induk guru dan tenaga kependidikan hasil import Excel maupun input manual",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "no": { "type": "string", "maxLength": 20 },
+        "nama": { "type": "string", "maxLength": 200 },
+        "nip": { "type": "string", "maxLength": 40 },
+        "nuptk": { "type": "string", "maxLength": 40 },
+        "jk": { "type": "string", "maxLength": 10 },
+        "tempatLahir": { "type": "string", "maxLength": 120 },
+        "tanggalLahir": { "type": "string", "maxLength": 40 },
+        "statusKepegawaian": { "type": "string", "maxLength": 100 },
+        "jenisPtk": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "statusData": { "type": "string", "enum": ["LENGKAP", "PERLU_PERIKSA"], "maxLength": 30 },
+        "linkedAccountId": { "type": "string", "maxLength": 128 },
+        "assignedClass": { "type": "string", "maxLength": 80 },
+        "details": { "type": "object" },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "no",
+        "nama",
+        "nip",
+        "nuptk",
+        "jk",
+        "tempatLahir",
+        "tanggalLahir",
+        "statusKepegawaian",
+        "jenisPtk",
+        "email",
+        "statusData",
+        "linkedAccountId",
+        "assignedClass",
+        "details",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Letter": {
+      "title": "Letter",
+      "description": "Arsip surat resmi sekolah yang dibuat dari data siswa dan pengaturan sekolah",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["SUKET_SISWA_DITERIMA", "SUKET_PINDAH_SEKOLAH"], "maxLength": 60 },
+        "title": { "type": "string", "maxLength": 150 },
+        "letterNumber": { "type": "string", "maxLength": 100 },
+        "letterDate": { "type": "string", "maxLength": 40 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "recipientName": { "type": "string", "maxLength": 200 },
+        "data": { "type": "object" },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "type",
+        "title",
+        "letterNumber",
+        "letterDate",
+        "studentId",
+        "recipientName",
+        "data",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Data presensi harian siswa per rombel serta penetapan wali kelas",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "kind": { "type": "string", "enum": ["HOMEROOM_MAP", "DAILY_SHEET"], "maxLength": 30 },
+        "date": { "type": "string", "maxLength": 40 },
+        "rombel": { "type": "string", "maxLength": 80 },
+        "waliKelasId": { "type": "string", "maxLength": 128 },
+        "waliKelasName": { "type": "string", "maxLength": 150 },
+        "waliKelasNip": { "type": "string", "maxLength": 40 },
+        "updatedBy": { "type": "string", "maxLength": 150 },
+        "entries": { "type": "object" },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "kind",
+        "date",
+        "rombel",
+        "waliKelasId",
+        "waliKelasName",
+        "waliKelasNip",
+        "updatedBy",
+        "entries",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "Dokumen pengaturan dan identitas utama sekolah"
+    },
+    "/schools/{schoolId}/assets/{slot}": {
+      "schema": { "$ref": "#/entities/SchoolAsset" },
+      "description": "Penyimpanan berkas gambar sekolah (logo, kop, ttd, stempel)"
+    },
+    "/schools/{schoolId}/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Daftar akun login Operator dan Guru"
+    },
+    "/schools/{schoolId}/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Koleksi permanen data induk peserta didik"
+    },
+    "/schools/{schoolId}/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/Teacher" },
+      "description": "Koleksi permanen data induk guru dan PTK"
+    },
+    "/schools/{schoolId}/letters/{letterId}": {
+      "schema": { "$ref": "#/entities/Letter" },
+      "description": "Koleksi arsip surat keterangan dan persuratan sekolah"
+    },
+    "/schools/{schoolId}/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Koleksi data absensi harian siswa dan penetapan wali kelas"
+    }
+  }
+}

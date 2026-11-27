@@ -85,6 +85,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [cloudFeedback, setCloudFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<{
     slot: SchoolFileSlot;
@@ -265,10 +269,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const handleConnectCloudAndSync = async () => {
     setCloudSyncing(true);
     setFeedback(null);
+    setCloudFeedback(null);
     try {
       const user = cloudUser || (await signInWithGoogleForCloudSync());
       if (!user.emailVerified) {
-        setFeedback({
+        setCloudFeedback({
           type: 'error',
           message: 'Email akun Google belum terverifikasi.',
         });
@@ -292,7 +297,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         summary.restoredFromCloud.letters +
         summary.restoredFromCloud.attendance;
 
-      setFeedback({
+      setCloudFeedback({
         type: 'success',
         message: `Sinkronisasi Database Online (${user.email || 'Google'}) berhasil. ${
           pushedTotal > 0 ? `${pushedTotal} data dikirim ke server online. ` : ''
@@ -305,9 +310,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       if (raw.includes('popup-closed-by-user') || raw.includes('cancelled-popup-request')) {
-        setFeedback({
+        setCloudFeedback({
           type: 'error',
           message: 'Proses masuk Google dibatalkan.',
+        });
+      } else if (raw.includes('auth/unauthorized-domain')) {
+        const currentHost =
+          typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+        setCloudFeedback({
+          type: 'error',
+          message: `Domain "${currentHost}" belum terdaftar di Firebase Authentication -> Settings -> Authorized domains.`,
+        });
+      } else if (raw.includes('auth/popup-blocked')) {
+        setCloudFeedback({
+          type: 'error',
+          message:
+            'Popup login Google diblokir oleh browser. Izinkan pop-up untuk situs ini lalu coba lagi.',
         });
       } else {
         let friendly = 'Gagal menyinkronkan data ke Database Online.';
@@ -320,7 +338,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         } catch {
           if (raw) friendly = raw;
         }
-        setFeedback({ type: 'error', message: friendly });
+        setCloudFeedback({ type: 'error', message: friendly });
       }
     } finally {
       setCloudSyncing(false);
@@ -330,14 +348,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const handleDisconnectCloud = async () => {
     setCloudSyncing(true);
     setFeedback(null);
+    setCloudFeedback(null);
     try {
       await signOutFromCloudSync();
-      setFeedback({
+      setCloudFeedback({
         type: 'success',
         message: 'Koneksi akun Google untuk sinkronisasi browser telah diputuskan.',
       });
     } catch {
-      setFeedback({
+      setCloudFeedback({
         type: 'error',
         message: 'Gagal memutuskan koneksi akun Google.',
       });
@@ -796,6 +815,34 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             )}
           </div>
         </div>
+
+        {cloudFeedback && (
+          <div
+            role={cloudFeedback.type === 'error' ? 'alert' : 'status'}
+            className={`flex items-start justify-between gap-2.5 rounded-xl border px-3 py-2.5 text-xs font-medium ${
+              cloudFeedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-rose-50 border-rose-200 text-rose-800'
+            }`}
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              {cloudFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              )}
+              <span className="break-words">{cloudFeedback.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCloudFeedback(null)}
+              aria-label="Tutup pesan sinkronisasi"
+              className="p-0.5 rounded hover:bg-black/5 shrink-0 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 10. Bagian Manajemen Akun Guru */}

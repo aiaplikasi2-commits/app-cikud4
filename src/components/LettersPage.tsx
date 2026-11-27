@@ -1787,23 +1787,20 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                           key={l.id}
                           className="hover:bg-slate-50/70 transition-colors"
                         >
-                          <td className="px-4 py-3 text-xs font-semibold text-slate-600">
+                          <td className="px-4 py-3 text-xs font-semibold text-slate-700">
                             {l.type === 'SUKET_PINDAH_SEKOLAH'
                               ? 'Pindah Sekolah'
                               : l.type === 'SURAT_LAIN_LAIN'
-                                ? 'Surat Lain-lain'
+                                ? l.data.customTitle?.trim() ||
+                                  l.title ||
+                                  'Surat Lain-lain'
                                 : 'Ket. Diterima'}
                           </td>
                           <td className="px-4 py-3 font-mono text-xs font-semibold text-[#17325C]">
                             {l.letterNumber}
                           </td>
                           <td className="px-4 py-3 font-bold text-slate-900">
-                            <div>{l.recipientName}</div>
-                            {l.type === 'SURAT_LAIN_LAIN' && (
-                              <div className="text-[11px] font-semibold text-slate-500">
-                                {l.title}
-                              </div>
-                            )}
+                            {l.recipientName}
                           </td>
                           <td className="px-4 py-3 font-semibold text-slate-800">
                             {l.type === 'SURAT_LAIN_LAIN'
@@ -1848,13 +1845,23 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                     className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-[0_2px_10px_rgba(15,23,42,0.04)] space-y-2.5"
                   >
                     <div>
-                      <p className="font-mono text-[11px] font-bold text-[#1D63D8]">
-                        {l.letterNumber}
-                      </p>
-                      <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-mono text-[11px] font-bold text-[#1D63D8]">
+                          {l.letterNumber}
+                        </p>
+                        <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700">
+                          {l.type === 'SUKET_PINDAH_SEKOLAH'
+                            ? 'Pindah Sekolah'
+                            : l.type === 'SURAT_LAIN_LAIN'
+                              ? l.data.customTitle?.trim() ||
+                                l.title ||
+                                'Surat Lain-lain'
+                              : 'Ket. Diterima'}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-900 mt-1">
                         {l.recipientName}
                       </h3>
-                      <p className="text-xs text-slate-600 mt-0.5">{l.title}</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 rounded-xl p-2.5 border border-slate-100">

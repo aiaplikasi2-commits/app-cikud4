@@ -281,12 +281,21 @@ function isOriginAllowed(req: Request, origin: string, allowlist: Set<string>): 
   }
   try {
     const parsedOrigin = new URL(normalized);
-    const reqHost = (req.headers['x-forwarded-host'] || req.get('host') || '')
+    const forwardedHost = (req.headers['x-forwarded-host'] || '')
       .toString()
       .split(',')[0]
       .trim()
       .toLowerCase();
-    if (reqHost && parsedOrigin.host.toLowerCase() === reqHost) {
+    const directHost = (req.get('host') || '')
+      .toString()
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    const originHost = parsedOrigin.host.toLowerCase();
+    if (
+      (forwardedHost && originHost === forwardedHost) ||
+      (directHost && originHost === directHost)
+    ) {
       return true;
     }
     if (

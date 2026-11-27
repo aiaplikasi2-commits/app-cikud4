@@ -17,6 +17,7 @@ const SESSION_TOKEN_STORAGE_KEY = 'school_admin_session_token';
 
 const RAW_API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL ?? '')
   .trim()
+  .replace(/^['"]+|['"]+$/g, '')
   .replace(/\/+$/, '');
 
 export function getApiBaseUrl(): string {

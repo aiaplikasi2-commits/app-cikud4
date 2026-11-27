@@ -22,15 +22,38 @@ function jsonError(status: number, error: string): Response {
   });
 }
 
+function readRuntimeEnv(key: string): string {
+  const netlifyEnv = (
+    globalThis as {
+      Netlify?: { env?: { get?: (name: string) => string | undefined } };
+    }
+  ).Netlify?.env;
+  const fromNetlify =
+    typeof netlifyEnv?.get === 'function' ? netlifyEnv.get(key) : undefined;
+  const fromProcess =
+    typeof process !== 'undefined' ? process.env?.[key] : undefined;
+  return String(fromNetlify ?? fromProcess ?? '');
+}
+
+function normalizeBackendUrl(raw: string): string {
+  let cleaned = raw
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .replace(/\/+$/, '');
+  if (!cleaned) return '';
+  if (!/^https?:\/\//i.test(cleaned)) {
+    const isLocal =
+      cleaned.startsWith('localhost') || cleaned.startsWith('127.0.0.1');
+    cleaned = `${isLocal ? 'http' : 'https'}://${cleaned}`;
+  }
+  return cleaned;
+}
+
 function getBackendBaseUrl(): string {
-  const candidates = [
-    process.env.BACKEND_URL,
-    process.env.API_BASE_URL,
-    process.env.VITE_API_BASE_URL,
-  ];
-  for (const raw of candidates) {
-    const cleaned = String(raw ?? '').trim().replace(/\/+$/, '');
-    if (cleaned) return cleaned;
+  const keys = ['BACKEND_URL', 'API_BASE_URL', 'VITE_API_BASE_URL'];
+  for (const key of keys) {
+    const normalized = normalizeBackendUrl(readRuntimeEnv(key));
+    if (normalized) return normalized;
   }
   return '';
 }

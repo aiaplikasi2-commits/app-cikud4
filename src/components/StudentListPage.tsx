@@ -369,25 +369,23 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({
                               <Eye className="w-3.5 h-3.5" />
                               Profil
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(s.id)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Edit
+                            </button>
                             {isOperator && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEdit(s.id)}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteTarget(s)}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700 cursor-pointer"
-                                  aria-label={`Hapus ${s.nama}`}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTarget(s)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700 cursor-pointer"
+                                aria-label={`Hapus ${s.nama}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -465,25 +463,23 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({
                       <Eye className="w-3.5 h-3.5" />
                       Profil
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEdit(s.id)}
+                      className="min-h-[40px] inline-flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit
+                    </button>
                     {isOperator && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(s.id)}
-                          className="min-h-[38px] inline-flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(s)}
-                          className="min-h-[38px] inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 cursor-pointer"
-                          aria-label={`Hapus ${s.nama}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(s)}
+                        className="min-h-[40px] inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 cursor-pointer"
+                        aria-label={`Hapus ${s.nama}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     )}
                   </div>
                 </article>
@@ -506,9 +502,10 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({
       )}
 
       {/* Modal Tambah / Edit Siswa */}
-      {formOpen && isOperator && (
+      {formOpen && (isOperator || Boolean(editingStudent)) && (
         <StudentFormModal
           existingStudent={editingStudent}
+          userRole={userRole}
           onClose={() => {
             setFormOpen(false);
             setEditingStudent(null);
@@ -516,7 +513,11 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({
           onSaved={(saved) => {
             setFormOpen(false);
             setEditingStudent(null);
-            setSuccessMsg(`Data siswa "${saved.nama}" berhasil disimpan.`);
+            setSuccessMsg(
+              isOperator
+                ? `Data siswa "${saved.nama}" berhasil disimpan.`
+                : `Data siswa "${saved.nama}" berhasil diperbarui ke database online.`
+            );
             fetchList();
           }}
         />
@@ -537,16 +538,12 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({
                 }
               : undefined
           }
-          onEdit={
-            isOperator
-              ? () => {
-                  const target = detailStudent;
-                  setDetailStudent(null);
-                  setEditingStudent(target);
-                  setFormOpen(true);
-                }
-              : undefined
-          }
+          onEdit={() => {
+            const target = detailStudent;
+            setDetailStudent(null);
+            setEditingStudent(target);
+            setFormOpen(true);
+          }}
         />
       )}
 

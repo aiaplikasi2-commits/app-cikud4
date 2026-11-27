@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, LogOut, WifiOff } from 'lucide-react';
+import { AlertCircle, Bell, LogOut, WifiOff } from 'lucide-react';
 import { SchoolHeader } from './components/SchoolHeader';
 import { AdminAvatarIcon } from './components/MenuIcons';
 import {
@@ -18,7 +18,7 @@ import { StudentListPage } from './components/StudentListPage';
 import { LettersPage } from './components/LettersPage';
 import { AttendancePage } from './components/AttendancePage';
 import { AgendaHarianPage } from './components/AgendaHarianPage';
-import { AgendaDashboardWidget } from './components/AgendaDashboardWidget';
+import { AdminNotificationsPage } from './components/AdminNotificationsPage';
 import {
   AppNavigationTarget,
   BottomTabId,
@@ -28,6 +28,7 @@ import { EMPTY_SCHOOL_SETTINGS, SchoolSettings } from './types/settings';
 import type { AuthUser, PublicSchoolInfo } from './types/auth';
 import type { StudentRecord } from './types/student';
 import { buildAuthHeaders, fetchAuthStatus, logoutUser } from './lib/authApi';
+import { fetchAdminUnreadCount } from './lib/notificationApi';
 import { loadSchoolSettings } from './lib/settingsStorage';
 import { auth, onAuthStateChanged, type FirebaseUser } from './lib/firebase';
 import { runFullCloudSync } from './lib/firestoreSync';
@@ -42,7 +43,8 @@ type OperatorView =
   | 'guru'
   | 'tendik'
   | 'surat'
-  | 'agenda-harian';
+  | 'agenda-harian'
+  | 'notifikasi-admin';
 type GuruView = 'beranda' | 'siswa' | 'absen-siswa' | 'guru' | 'agenda-harian';
 
 const EMPTY_PUBLIC_SCHOOL: PublicSchoolInfo = {
@@ -62,6 +64,7 @@ function parseOperatorViewFromPath(pathname: string): OperatorView {
   if (clean === '/tendik') return 'tendik';
   if (clean === '/surat') return 'surat';
   if (clean === '/agenda-harian') return 'agenda-harian';
+  if (clean === '/notifikasi-admin') return 'notifikasi-admin';
   return 'beranda';
 }
 
@@ -83,6 +86,7 @@ function getPathForOperatorView(view: OperatorView): string {
   if (view === 'tendik') return '/tendik';
   if (view === 'surat') return '/surat';
   if (view === 'agenda-harian') return '/agenda-harian';
+  if (view === 'notifikasi-admin') return '/notifikasi-admin';
   return '/';
 }
 
@@ -92,7 +96,8 @@ function isProtectedOperatorPath(pathname: string): boolean {
     clean === '/pengaturan' ||
     clean === '/manajemen-akun-guru' ||
     clean === '/tendik' ||
-    clean === '/surat'
+    clean === '/surat' ||
+    clean === '/notifikasi-admin'
   );
 }
 
@@ -129,7 +134,7 @@ export default function App() {
   const [settings, setSettings] = useState<SchoolSettings>(EMPTY_SCHOOL_SETTINGS);
   const [letterPreselectedStudent, setLetterPreselectedStudent] =
     useState<StudentRecord | null>(null);
-  const [agendaOpenCreate, setAgendaOpenCreate] = useState(false);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [cloudUser, setCloudUser] = useState<FirebaseUser | null>(null);
   const cloudSyncLockRef = useRef(false);
 
@@ -187,6 +192,15 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  const refreshUnreadNotifications = useCallback(async () => {
+    try {
+      const count = await fetchAdminUnreadCount();
+      setUnreadNotifCount(count);
+    } catch {
+      // Ignore transient error when fetching unread badge count
+    }
+  }, []);
+
   useEffect(() => {
     if (authLoading || !isOnline || !cloudUser || !cloudUser.emailVerified) {
       return;
@@ -209,6 +223,7 @@ export default function App() {
           summary.restoredFromCloud.letters > 0 ||
           summary.restoredFromCloud.attendance > 0 ||
           summary.restoredFromCloud.agendas > 0 ||
+          summary.restoredFromCloud.notifications > 0 ||
           summary.restoredFromCloud.settingsUpdated;
         if (restoredSomething) {
           await refreshAuth();
@@ -221,6 +236,7 @@ export default function App() {
               department: loaded.identity.department,
               logoUrl: loaded.files.logo?.url ?? null,
             });
+            await refreshUnreadNotifications();
           }
         }
       })
@@ -230,7 +246,15 @@ export default function App() {
       .finally(() => {
         cloudSyncLockRef.current = false;
       });
-  }, [authLoading, isOnline, cloudUser, currentUser?.role, needsInitialSetup, refreshAuth]);
+  }, [
+    authLoading,
+    isOnline,
+    cloudUser,
+    currentUser?.role,
+    needsInitialSetup,
+    refreshAuth,
+    refreshUnreadNotifications,
+  ]);
 
   // Enforce RBAC and URL consistency on auth state change and browser history navigation
   useEffect(() => {
@@ -291,10 +315,11 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [authLoading, currentUser, navigateUrl]);
 
-  // Load full settings when authenticated as OPERATOR
+  // Load full settings & unread notification count when authenticated as OPERATOR
   useEffect(() => {
     if (!currentUser || currentUser.role !== 'OPERATOR') {
       setSettings(EMPTY_SCHOOL_SETTINGS);
+      setUnreadNotifCount(0);
       return;
     }
     let mounted = true;
@@ -312,6 +337,15 @@ export default function App() {
       })
       .catch(() => {
         // Keep defaults if loading fails
+      });
+    fetchAdminUnreadCount()
+      .then((count) => {
+        if (mounted) {
+          setUnreadNotifCount(count);
+        }
+      })
+      .catch(() => {
+        // Ignore transient unread count failure
       });
     return () => {
       mounted = false;
@@ -348,6 +382,7 @@ export default function App() {
     } finally {
       setCurrentUser(null);
       setSettings(EMPTY_SCHOOL_SETTINGS);
+      setUnreadNotifCount(0);
       setOperatorView('beranda');
       setGuruView('beranda');
       setSelectedMenuId(null);
@@ -358,6 +393,21 @@ export default function App() {
       setLoggingOut(false);
     }
   };
+
+  const handleSelectTab = useCallback(
+    (tab: NavTabId) => {
+      setActiveTab(tab);
+      setSelectedMenuId(null);
+      setOperatorView('beranda');
+      setGuruView('beranda');
+      navigateUrl('/');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (tab === 'beranda' && currentUser?.role === 'OPERATOR') {
+        void refreshUnreadNotifications();
+      }
+    },
+    [currentUser?.role, navigateUrl, refreshUnreadNotifications]
+  );
 
   const handleNavigateTarget = useCallback(
     (target: AppNavigationTarget) => {
@@ -386,26 +436,17 @@ export default function App() {
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
-    [currentUser, navigateUrl]
+    [currentUser, handleSelectTab, navigateUrl]
   );
 
-  const handleOpenAgendaFromDashboard = useCallback(
-    (openCreate = false) => {
-      if (!currentUser) return;
-      setAgendaOpenCreate(Boolean(openCreate));
-      setActiveTab('beranda');
-      setSelectedMenuId('agenda-harian');
-      if (currentUser.role === 'GURU') {
-        setGuruView('agenda-harian');
-        navigateUrl('/agenda-harian');
-      } else {
-        setOperatorView('agenda-harian');
-        navigateUrl('/agenda-harian');
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-    [currentUser, navigateUrl]
-  );
+  const handleOpenAdminNotifications = useCallback(() => {
+    if (!currentUser || currentUser.role !== 'OPERATOR') return;
+    setActiveTab('beranda');
+    setSelectedMenuId(null);
+    setOperatorView('notifikasi-admin');
+    navigateUrl(getPathForOperatorView('notifikasi-admin'));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentUser, navigateUrl]);
 
   const handleSelectOperatorMenu = (menu: MenuItem) => {
     setActiveTab('beranda');
@@ -420,9 +461,6 @@ export default function App() {
       menu.id === 'surat' ||
       menu.id === 'agenda-harian'
     ) {
-      if (menu.id === 'agenda-harian') {
-        setAgendaOpenCreate(false);
-      }
       setOperatorView(menu.id);
       navigateUrl(getPathForOperatorView(menu.id));
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -438,22 +476,10 @@ export default function App() {
       menu.id === 'guru' ||
       menu.id === 'agenda-harian'
     ) {
-      if (menu.id === 'agenda-harian') {
-        setAgendaOpenCreate(false);
-      }
       setGuruView(menu.id);
       navigateUrl(`/${menu.id}`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
-
-  const handleSelectTab = (tab: NavTabId) => {
-    setActiveTab(tab);
-    setSelectedMenuId(null);
-    setOperatorView('beranda');
-    setGuruView('beranda');
-    navigateUrl('/');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   if (authLoading) {
@@ -539,7 +565,7 @@ export default function App() {
 
   return (
     <div className="min-h-dvh app-ambient-bg text-slate-900 flex flex-col print:bg-white relative overflow-x-hidden">
-      <main className="print-container-reset relative z-10 flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 sm:pb-28">
+      <main className="print-container-reset relative z-10 flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-24 sm:pb-28">
         {!isOnline && (
           <div
             role="alert"
@@ -595,10 +621,7 @@ export default function App() {
             <AgendaHarianPage
               user={currentUser}
               schoolName={publicSchool.schoolName}
-              initialOpenCreate={agendaOpenCreate}
-              onConsumedInitialCreate={() => setAgendaOpenCreate(false)}
               onBack={() => {
-                setAgendaOpenCreate(false);
                 setGuruView('beranda');
                 setActiveTab('beranda');
                 setSelectedMenuId(null);
@@ -645,7 +668,6 @@ export default function App() {
                 school={publicSchool}
                 selectedMenuId={selectedMenuId}
                 onSelectMenu={handleSelectGuruMenu}
-                onOpenAgenda={handleOpenAgendaFromDashboard}
                 onOpenProfil={() => handleSelectTab('profil')}
                 onLogout={handleLogout}
                 loggingOut={loggingOut}
@@ -759,15 +781,26 @@ export default function App() {
             schoolName={
               settings.identity.schoolName || publicSchool.schoolName
             }
-            initialOpenCreate={agendaOpenCreate}
-            onConsumedInitialCreate={() => setAgendaOpenCreate(false)}
             onBack={() => {
-              setAgendaOpenCreate(false);
               setOperatorView('beranda');
               setActiveTab('beranda');
               setSelectedMenuId(null);
               navigateUrl(getPathForOperatorView('beranda'));
               window.scrollTo({ top: 0, behavior: 'smooth' });
+              void refreshUnreadNotifications();
+            }}
+          />
+        ) : operatorView === 'notifikasi-admin' ? (
+          <AdminNotificationsPage
+            onUnreadCountChange={setUnreadNotifCount}
+            onNavigateTarget={(target) => handleNavigateTarget(target)}
+            onBack={() => {
+              setOperatorView('beranda');
+              setActiveTab('beranda');
+              setSelectedMenuId(null);
+              navigateUrl(getPathForOperatorView('beranda'));
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+              void refreshUnreadNotifications();
             }}
           />
         ) : activeTab !== 'beranda' ? (
@@ -791,29 +824,53 @@ export default function App() {
               logoUrl={effectiveLogoUrl}
             />
 
-            {/* Bilah Akun Operator & Logout */}
-            <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/92 backdrop-blur-md border border-white/90 px-3.5 sm:px-4 py-2.5 shadow-[0_6px_24px_rgba(15,35,66,0.06)]">
+            {/* Bilah Akun Operator, Notifikasi Admin & Logout */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/92 backdrop-blur-md border border-white/90 px-3.5 sm:px-4 py-2.5 shadow-[0_6px_24px_rgba(15,35,66,0.06)]">
               <div className="flex items-center gap-3 min-w-0">
                 <AdminAvatarIcon className="w-10 h-10 shrink-0" />
-                <div className="min-w-0 flex items-center gap-2">
+                <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="text-sm sm:text-base font-extrabold text-[#17325C] truncate">
                     {currentUser.fullName}
                   </span>
-                  <span className="inline-flex items-center rounded-md bg-sky-50 border border-sky-200/80 px-2 py-0.5 text-[11px] font-bold text-[#1D63D8] shrink-0">
-                    Operator
+                  <span aria-hidden="true" className="text-slate-300 text-xs">
+                    ·
+                  </span>
+                  <span className="text-xs font-bold text-[#1D63D8] shrink-0">
+                    Operator / Admin
                   </span>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={loggingOut}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-[#FF5B4D] to-[#DC3026] hover:brightness-105 disabled:opacity-60 px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(220,48,38,0.28)] active:scale-95 transition-all cursor-pointer shrink-0 whitespace-nowrap"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                {loggingOut ? 'Keluar...' : 'Logout'}
-              </button>
+              <div className="flex items-center gap-2 shrink-0 ml-auto">
+                <button
+                  type="button"
+                  onClick={handleOpenAdminNotifications}
+                  aria-label={
+                    unreadNotifCount > 0
+                      ? `Notifikasi Admin (${unreadNotifCount} belum dibaca)`
+                      : 'Notifikasi Admin'
+                  }
+                  className="relative inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-200 px-3 py-2 text-xs font-bold text-[#17325C] transition-colors cursor-pointer min-h-[40px] min-w-[40px] whitespace-nowrap"
+                >
+                  <Bell className="w-4 h-4 text-[#1D63D8]" />
+                  <span className="hidden sm:inline">Notifikasi</span>
+                  {unreadNotifCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-rose-600 px-1 text-[10px] font-extrabold text-white tabular-nums">
+                      {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-[#FF5B4D] to-[#DC3026] hover:brightness-105 disabled:opacity-60 px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(220,48,38,0.28)] active:scale-95 transition-all cursor-pointer shrink-0 whitespace-nowrap min-h-[40px]"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  {loggingOut ? 'Keluar...' : 'Logout'}
+                </button>
+              </div>
             </div>
 
             {/* Menu Utama Operator */}
@@ -821,12 +878,6 @@ export default function App() {
               items={OPERATOR_MENU_ITEMS}
               selectedMenuId={selectedMenuId}
               onSelectMenu={handleSelectOperatorMenu}
-            />
-
-            {/* Ringkasan Agenda Harian Operator */}
-            <AgendaDashboardWidget
-              userRole="OPERATOR"
-              onOpenAgenda={handleOpenAgendaFromDashboard}
             />
           </div>
         )}

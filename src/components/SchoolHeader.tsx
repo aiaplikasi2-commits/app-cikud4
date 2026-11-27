@@ -53,11 +53,11 @@ export const SchoolHeader: React.FC<SchoolHeaderProps> = ({
         </div>
 
         {/* Identitas Sekolah (Tengah) */}
-        <div className="flex-1 min-w-0 text-center">
-          <h1 className="text-[19px] sm:text-2xl font-extrabold tracking-tight text-[#122B52] leading-tight truncate">
+        <div className="flex-1 min-w-0 text-center px-1">
+          <h1 className="text-base sm:text-xl md:text-2xl font-extrabold tracking-tight text-[#122B52] leading-snug line-clamp-2 sm:truncate">
             {schoolTitle}
           </h1>
-          <p className="mt-0.5 text-xs sm:text-sm font-medium text-slate-600 tracking-wide truncate">
+          <p className="mt-0.5 text-[11px] sm:text-sm font-medium text-slate-600 tracking-wide truncate">
             {subtitle}
           </p>
         </div>

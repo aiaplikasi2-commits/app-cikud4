@@ -8,6 +8,7 @@ import type {
   ResetTokenValidationResponse,
   TeacherAccount,
 } from '../types/auth';
+import type { TeacherInputPayload, TeacherRecord } from '../types/teacher';
 import {
   deleteAccountFromCloud,
   syncServerSnapshotIfOperator,
@@ -263,6 +264,44 @@ export async function updateMyAssignedClass(assignedClass: string): Promise<Auth
     'Gagal menyimpan kelas yang dipegang.'
   );
   return data.user;
+}
+
+export interface MyProfileResponse {
+  user: AuthUser;
+  teacherProfile: TeacherRecord | null;
+  changedFields?: string[];
+}
+
+export async function fetchMyProfile(): Promise<MyProfileResponse> {
+  const response = await apiFetch('/api/auth/me/profile', {
+    cache: 'no-store',
+    credentials: 'include',
+    headers: buildAuthHeaders(),
+  });
+  return readJsonSafe<MyProfileResponse>(
+    response,
+    'Gagal memuat data profil pribadi.'
+  );
+}
+
+export async function updateMyProfile(payload: {
+  fullName: string;
+  nip: string;
+  email: string;
+  teacherProfile?: Partial<TeacherInputPayload>;
+}): Promise<MyProfileResponse> {
+  const response = await apiFetch('/api/auth/me/profile', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  const data = await readJsonSafe<MyProfileResponse>(
+    response,
+    'Gagal memperbarui profil pribadi.'
+  );
+  await syncServerSnapshotIfOperator(buildAuthHeaders()).catch(() => false);
+  return data;
 }
 
 export async function requestForgotPassword(

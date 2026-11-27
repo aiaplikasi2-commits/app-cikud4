@@ -133,7 +133,7 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
 }) => {
   return (
     <section aria-label="Menu Utama" className="w-full">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 sm:gap-4.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {items.map((item) => {
           const isSelected = selectedMenuId === item.id;
           return (
@@ -142,7 +142,7 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
               type="button"
               onClick={() => onSelectMenu(item)}
               aria-pressed={isSelected}
-              className={`group relative overflow-hidden flex flex-col items-center justify-center text-center rounded-[22px] border px-3 py-4 sm:px-5 sm:py-5 min-h-[150px] sm:min-h-[170px] ring-1 ring-inset ring-white/45 transition-all duration-200 ease-out hover:-translate-y-1 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 cursor-pointer ${
+              className={`group relative overflow-hidden flex flex-col items-center justify-center text-center rounded-[22px] border px-3 py-4 sm:px-4 sm:py-5 min-h-[136px] sm:min-h-[154px] ring-1 ring-inset ring-white/45 transition-all duration-200 ease-out hover:-translate-y-1 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 cursor-pointer ${
                 item.cardClass
               } ${isSelected ? 'ring-2 ring-[#17325C]' : ''}`}
             >
@@ -186,11 +186,11 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
                 className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-white/0 via-white/15 to-white/25 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               />
 
-              <div className="relative z-10 mb-2 sm:mb-2.5 transition-transform duration-200 ease-out group-hover:scale-110 group-hover:-translate-y-0.5">
+              <div className="relative z-10 mb-2 transition-transform duration-200 ease-out group-hover:scale-105 group-hover:-translate-y-0.5">
                 {item.icon}
               </div>
               <span
-                className={`relative z-10 text-[15px] sm:text-[17px] font-extrabold tracking-tight leading-snug ${item.titleClass}`}
+                className={`relative z-10 text-sm sm:text-[15px] font-extrabold tracking-tight leading-snug ${item.titleClass}`}
               >
                 {item.title}
               </span>

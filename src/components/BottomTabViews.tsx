@@ -1,41 +1,31 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
-  Bell,
   BookOpen,
-  Camera,
-  CameraOff,
   CheckCircle2,
   Eye,
   EyeOff,
-  FileText,
-  History,
   KeyRound,
+  Lock,
   LogOut,
-  QrCode,
-  RefreshCw,
-  Search,
+  PencilLine,
+  Save,
   User,
   Users,
 } from 'lucide-react';
 import type { AuthUser, ClassOptionItem, PublicSchoolInfo } from '../types/auth';
 import type { SchoolSettings } from '../types/settings';
-import type { StudentListItem } from '../types/student';
-import type { TeacherListItem } from '../types/teacher';
-import type { LetterRecord } from '../types/letter';
-import type { AttendanceSheetResponse } from '../types/attendance';
+import type { TeacherInputPayload, TeacherRecord } from '../types/teacher';
 import {
   changeOwnPassword,
   fetchClassOptions,
+  fetchMyProfile,
   updateMyAssignedClass,
+  updateMyProfile,
 } from '../lib/authApi';
-import { listStudents } from '../lib/studentApi';
-import { listTeachers } from '../lib/teacherApi';
-import { getAttendanceSheet } from '../lib/attendanceApi';
-import { listLetters } from '../lib/letterApi';
 
-export type BottomTabId = 'riwayat' | 'scan-qr' | 'notifikasi' | 'profil';
+export type BottomTabId = 'profil';
 export type AppNavigationTarget =
   | 'pengaturan'
   | 'manajemen-akun-guru'
@@ -45,51 +35,82 @@ export type AppNavigationTarget =
   | 'tendik'
   | 'surat'
   | 'agenda-harian'
+  | 'notifikasi-admin'
   | 'profil';
 
 interface BottomTabViewsProps {
   tab: BottomTabId;
   user: AuthUser;
   school: PublicSchoolInfo;
-  settings: SchoolSettings;
+  settings?: SchoolSettings;
   onBackHome: () => void;
-  onNavigate: (target: AppNavigationTarget) => void;
+  onNavigate?: (target: AppNavigationTarget) => void;
   onPasswordChanged: (updatedUser: AuthUser) => void;
   onUserUpdated?: (updatedUser: AuthUser) => void;
   onLogout: () => void;
   loggingOut?: boolean;
 }
 
-interface BarcodeDetectorLike {
-  detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>>;
+interface TeacherSelfBioForm {
+  nuptk: string;
+  jk: string;
+  tempatLahir: string;
+  tanggalLahir: string;
+  agama: string;
+  alamatJalan: string;
+  rt: string;
+  rw: string;
+  namaDusun: string;
+  desaKelurahan: string;
+  kecamatan: string;
+  kodePos: string;
+  telepon: string;
+  hp: string;
+  namaIbuKandung: string;
+  statusPerkawinan: string;
+  namaSuamiIstri: string;
+  pekerjaanSuamiIstri: string;
+  kewarganegaraan: string;
+  bank: string;
+  rekeningAtasNama: string;
+  namaWajibPajak: string;
 }
 
-function formatDateShort(value?: string): string {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsed);
+function createEmptyBioForm(record?: TeacherRecord | null): TeacherSelfBioForm {
+  return {
+    nuptk: record?.nuptk || '',
+    jk: record?.jk || '',
+    tempatLahir: record?.tempatLahir || '',
+    tanggalLahir: record?.tanggalLahir || '',
+    agama: record?.agama || '',
+    alamatJalan: record?.alamatJalan || '',
+    rt: record?.rt || '',
+    rw: record?.rw || '',
+    namaDusun: record?.namaDusun || '',
+    desaKelurahan: record?.desaKelurahan || '',
+    kecamatan: record?.kecamatan || '',
+    kodePos: record?.kodePos || '',
+    telepon: record?.telepon || '',
+    hp: record?.hp || '',
+    namaIbuKandung: record?.namaIbuKandung || '',
+    statusPerkawinan: record?.statusPerkawinan || '',
+    namaSuamiIstri: record?.namaSuamiIstri || '',
+    pekerjaanSuamiIstri: record?.pekerjaanSuamiIstri || '',
+    kewarganegaraan: record?.kewarganegaraan || '',
+    bank: record?.bank || '',
+    rekeningAtasNama: record?.rekeningAtasNama || '',
+    namaWajibPajak: record?.namaWajibPajak || '',
+  };
 }
 
-function getTodayIsoDate(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function isMaskedValue(val?: string): boolean {
+  return Boolean(val && val.includes('•'));
 }
 
 export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
-  tab,
   user,
   school,
-  settings,
   onBackHome,
-  onNavigate,
   onPasswordChanged,
   onUserUpdated,
   onLogout,
@@ -97,22 +118,19 @@ export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
 }) => {
   const isOperator = user.role === 'OPERATOR';
 
-  // Shared live server data for Riwayat, Scan QR, Notifikasi
-  const [loadingData, setLoadingData] = useState(false);
-  const [dataError, setDataError] = useState<string | null>(null);
-  const [students, setStudents] = useState<StudentListItem[]>([]);
-  const [teachers, setTeachers] = useState<TeacherListItem[]>([]);
-  const [letters, setLetters] = useState<LetterRecord[]>([]);
-  const [attendanceInfo, setAttendanceInfo] =
-    useState<AttendanceSheetResponse | null>(null);
-  const [selectedRombel, setSelectedRombel] = useState('');
-
-  // Scan QR & ID Lookup state
-  const [qrQuery, setQrQuery] = useState('');
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Profil Account + Linked Teacher Biodata state
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [linkedTeacher, setLinkedTeacher] = useState<TeacherRecord | null>(null);
+  const [fullName, setFullName] = useState(user.fullName || '');
+  const [nip, setNip] = useState(user.nip || '');
+  const [email, setEmail] = useState(user.email || '');
+  const [bioForm, setBioForm] = useState<TeacherSelfBioForm>(() =>
+    createEmptyBioForm(null)
+  );
+  const [showBiodataFields, setShowBiodataFields] = useState(false);
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
 
   // Profil Guru Assigned Class state
   const [classOptions, setClassOptions] = useState<ClassOptionItem[]>([]);
@@ -137,7 +155,26 @@ export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
 
   useEffect(() => {
     setSelectedAssignedClass(user.assignedClass || '');
-  }, [user.assignedClass]);
+    setFullName(user.fullName || '');
+    setNip(user.nip || '');
+    setEmail(user.email || '');
+  }, [user.assignedClass, user.fullName, user.nip, user.email]);
+
+  const loadDetailedProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const res = await fetchMyProfile();
+      setFullName(res.user.fullName || '');
+      setNip(res.user.nip || '');
+      setEmail(res.user.email || '');
+      setLinkedTeacher(res.teacherProfile);
+      setBioForm(createEmptyBioForm(res.teacherProfile));
+    } catch {
+      // Fall back silently to prop user values if transient error
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
 
   const loadClassOptions = useCallback(async () => {
     if (isOperator) return;
@@ -153,262 +190,77 @@ export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
   }, [isOperator]);
 
   useEffect(() => {
-    if (tab === 'profil' && !isOperator) {
+    loadDetailedProfile();
+    if (!isOperator) {
       loadClassOptions();
     }
-  }, [tab, isOperator, loadClassOptions]);
+  }, [isOperator, loadDetailedProfile, loadClassOptions]);
 
-  const loadTabData = useCallback(
-    async (rombelOverride?: string) => {
-      setLoadingData(true);
-      setDataError(null);
-      try {
-        const [studentRes, teacherRes, attendanceRes, letterRes] =
-          await Promise.all([
-            listStudents(),
-            listTeachers(),
-            getAttendanceSheet({ rombel: rombelOverride || undefined }),
-            isOperator ? listLetters() : Promise.resolve(null),
-          ]);
-        setStudents(studentRes.students);
-        setTeachers(teacherRes.teachers);
-        setAttendanceInfo(attendanceRes);
-        if (!rombelOverride && attendanceRes.selectedRombel) {
-          setSelectedRombel(attendanceRes.selectedRombel);
-        }
-        if (letterRes) {
-          setLetters(letterRes.letters);
-        } else {
-          setLetters([]);
-        }
-      } catch (err) {
-        setDataError(
-          err instanceof Error ? err.message : 'Gagal memuat data server.'
-        );
-      } finally {
-        setLoadingData(false);
-      }
-    },
-    [isOperator]
-  );
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError(null);
+    setProfileSuccess(null);
 
-  useEffect(() => {
-    if (tab !== 'profil') {
-      loadTabData(selectedRombel || undefined);
-    }
-  }, [tab, loadTabData, selectedRombel]);
-
-  const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setCameraActive(false);
-  }, []);
-
-  useEffect(() => {
-    if (tab !== 'scan-qr') {
-      stopCamera();
-    }
-    return () => {
-      stopCamera();
-    };
-  }, [tab, stopCamera]);
-
-  const startCamera = async () => {
-    setCameraError(null);
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices?.getUserMedia
-    ) {
-      setCameraError('Kamera tidak tersedia. Gunakan pencarian manual.');
+    if (!fullName.trim()) {
+      setProfileError('Nama lengkap wajib diisi.');
       return;
     }
 
+    setProfileSubmitting(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+      const teacherPayload: Partial<TeacherInputPayload> | undefined =
+        linkedTeacher
+          ? {
+              nuptk: bioForm.nuptk,
+              jk: bioForm.jk,
+              tempatLahir: bioForm.tempatLahir,
+              tanggalLahir: bioForm.tanggalLahir,
+              agama: bioForm.agama,
+              alamatJalan: bioForm.alamatJalan,
+              rt: bioForm.rt,
+              rw: bioForm.rw,
+              namaDusun: bioForm.namaDusun,
+              desaKelurahan: bioForm.desaKelurahan,
+              kecamatan: bioForm.kecamatan,
+              kodePos: bioForm.kodePos,
+              telepon: bioForm.telepon,
+              hp: bioForm.hp,
+              namaIbuKandung: bioForm.namaIbuKandung,
+              statusPerkawinan: bioForm.statusPerkawinan,
+              namaSuamiIstri: bioForm.namaSuamiIstri,
+              pekerjaanSuamiIstri: bioForm.pekerjaanSuamiIstri,
+              kewarganegaraan: bioForm.kewarganegaraan,
+              bank: bioForm.bank,
+              rekeningAtasNama: bioForm.rekeningAtasNama,
+              namaWajibPajak: bioForm.namaWajibPajak,
+            }
+          : undefined;
+
+      const res = await updateMyProfile({
+        fullName: fullName.trim(),
+        nip: nip.trim(),
+        email: email.trim(),
+        teacherProfile: teacherPayload,
       });
-      streamRef.current = stream;
-      setCameraActive(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
+
+      (onUserUpdated ?? onPasswordChanged)(res.user);
+      if (res.teacherProfile) {
+        setLinkedTeacher(res.teacherProfile);
+        setBioForm(createEmptyBioForm(res.teacherProfile));
       }
-    } catch {
-      setCameraError('Izin kamera ditolak atau kamera tidak ditemukan.');
-      stopCamera();
+      setProfileSuccess(
+        res.changedFields && res.changedFields.length > 0
+          ? 'Profil berhasil disimpan ke database online.'
+          : 'Data profil sudah sesuai dan tersimpan.'
+      );
+    } catch (err) {
+      setProfileError(
+        err instanceof Error ? err.message : 'Gagal memperbarui data profil.'
+      );
+    } finally {
+      setProfileSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    if (!cameraActive || tab !== 'scan-qr') return;
-
-    const DetectorCtor = (
-      window as unknown as {
-        BarcodeDetector?: new (opts?: { formats?: string[] }) => BarcodeDetectorLike;
-      }
-    ).BarcodeDetector;
-
-    if (!DetectorCtor) {
-      setCameraError(
-        'Browser belum mendukung pemindaian QR otomatis. Ketik kode di kolom cari.'
-      );
-      return;
-    }
-
-    const detector = new DetectorCtor({ formats: ['qr_code', 'code_128'] });
-    let cancelled = false;
-    const timer = window.setInterval(async () => {
-      if (cancelled || !videoRef.current || videoRef.current.readyState < 2) {
-        return;
-      }
-      try {
-        const codes = await detector.detect(videoRef.current);
-        const raw = codes.find((c) => c.rawValue?.trim())?.rawValue?.trim();
-        if (raw) {
-          setQrQuery(raw);
-          stopCamera();
-        }
-      } catch {
-        // Ignore single frame detection error
-      }
-    }, 500);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [cameraActive, tab, stopCamera]);
-
-  const scanMatches = useMemo(() => {
-    const q = qrQuery.trim().toLowerCase();
-    if (!q) {
-      return {
-        students: [] as StudentListItem[],
-        teachers: [] as TeacherListItem[],
-        letters: [] as LetterRecord[],
-      };
-    }
-    return {
-      students: students
-        .filter(
-          (s) =>
-            s.nama.toLowerCase().includes(q) ||
-            s.nisn.toLowerCase().includes(q) ||
-            s.nipd.toLowerCase().includes(q) ||
-            s.rombelSaatIni.toLowerCase().includes(q)
-        )
-        .slice(0, 8),
-      teachers: teachers
-        .filter(
-          (t) =>
-            t.nama.toLowerCase().includes(q) ||
-            t.nip.toLowerCase().includes(q) ||
-            t.nuptk.toLowerCase().includes(q) ||
-            t.jenisPtk.toLowerCase().includes(q)
-        )
-        .slice(0, 8),
-      letters: isOperator
-        ? letters
-            .filter(
-              (l) =>
-                l.letterNumber.toLowerCase().includes(q) ||
-                l.recipientName.toLowerCase().includes(q) ||
-                l.title.toLowerCase().includes(q)
-            )
-            .slice(0, 8)
-        : [],
-    };
-  }, [qrQuery, students, teachers, letters, isOperator]);
-
-  const notifications = useMemo(() => {
-    const items: Array<{
-      id: string;
-      title: string;
-      detail: string;
-      actionLabel: string;
-      target: AppNavigationTarget;
-      tone: 'amber' | 'blue';
-    }> = [];
-
-    if (!isOperator && !(user.assignedClass || '').trim()) {
-      items.push({
-        id: 'guru-no-class',
-        title: 'Kelas yang Dipegang Belum Dipilih',
-        detail: 'Pilih kelas di Profil agar data siswa dan absen kelas tampil.',
-        actionLabel: 'Buka Profil',
-        target: 'profil',
-        tone: 'amber',
-      });
-    }
-
-    if (isOperator) {
-      const missingSettings: string[] = [];
-      if (!settings.identity.schoolName.trim()) missingSettings.push('Nama Sekolah');
-      if (!settings.identity.city.trim()) missingSettings.push('Kota');
-      if (!settings.principal.name.trim()) missingSettings.push('Kepala Sekolah');
-      if (!settings.principal.nip.trim()) missingSettings.push('NIP Kepala Sekolah');
-      if (missingSettings.length > 0) {
-        items.push({
-          id: 'settings-incomplete',
-          title: 'Pengaturan Belum Lengkap',
-          detail: `Lengkapi: ${missingSettings.join(', ')}`,
-          actionLabel: 'Pengaturan',
-          target: 'pengaturan',
-          tone: 'amber',
-        });
-      }
-    }
-
-    const studentsToCheck = students.filter(
-      (s) => s.statusData === 'PERLU_PERIKSA'
-    ).length;
-    if (studentsToCheck > 0) {
-      items.push({
-        id: 'students-check',
-        title: `${studentsToCheck} Data Siswa Perlu Periksa`,
-        detail: 'Lengkapi NISN, NIPD, atau rombel.',
-        actionLabel: 'Cek Siswa',
-        target: 'siswa',
-        tone: 'amber',
-      });
-    }
-
-    const teachersToCheck = teachers.filter(
-      (t) => t.statusData === 'PERLU_PERIKSA'
-    ).length;
-    if (teachersToCheck > 0) {
-      items.push({
-        id: 'teachers-check',
-        title: `${teachersToCheck} Data Guru & Tendik Perlu Periksa`,
-        detail: 'Periksa kelengkapan NIP/NIK.',
-        actionLabel: 'Cek Guru',
-        target: 'guru',
-        tone: 'amber',
-      });
-    }
-
-    const today = getTodayIsoDate();
-    if (
-      attendanceInfo?.selectedRombel &&
-      !attendanceInfo.savedDatesForRombel.some((d) => d.date === today)
-    ) {
-      items.push({
-        id: 'attendance-today',
-        title: `Absen ${attendanceInfo.selectedRombel} Hari Ini Belum Disimpan`,
-        detail: `Tanggal ${formatDateShort(today)}`,
-        actionLabel: 'Absen',
-        target: 'absen-siswa',
-        tone: 'blue',
-      });
-    }
-
-    return items;
-  }, [isOperator, user.assignedClass, settings, students, teachers, attendanceInfo]);
 
   const handleSaveAssignedClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -470,16 +322,14 @@ export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
     }
   };
 
-  const tabMeta: Record<
-    BottomTabId,
-    { title: string; icon: React.ComponentType<{ className?: string }> }
-  > = {
-    riwayat: { title: 'Riwayat', icon: History },
-    'scan-qr': { title: 'Scan QR', icon: QrCode },
-    notifikasi: { title: 'Notifikasi', icon: Bell },
-    profil: { title: 'Profil', icon: User },
+  const setBioField = <K extends keyof TeacherSelfBioForm>(
+    key: K,
+    val: string
+  ) => {
+    setBioForm((prev) => ({ ...prev, [key]: val }));
+    setProfileError(null);
+    setProfileSuccess(null);
   };
-  const ActiveIcon = tabMeta[tab].icon;
 
   return (
     <div className="pt-4 sm:pt-6 space-y-4">
@@ -495,696 +345,765 @@ export const BottomTabViews: React.FC<BottomTabViewsProps> = ({
           </button>
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
-              <ActiveIcon className="w-5 h-5 text-white" />
+              <User className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-lg sm:text-xl font-extrabold text-white drop-shadow-[0_1px_2px_rgba(7,25,65,0.35)] truncate">
-              {tabMeta[tab].title}
+              Profil Akun
             </h1>
           </div>
         </div>
-
-        {tab !== 'profil' && (
-          <button
-            type="button"
-            disabled={loadingData}
-            onClick={() => loadTabData(selectedRombel || undefined)}
-            className="relative z-10 inline-flex items-center gap-1.5 rounded-xl bg-white hover:bg-blue-50 disabled:opacity-60 px-3.5 py-2 text-xs font-bold text-[#0F53BD] shadow-xs active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${loadingData ? 'animate-spin' : ''}`}
-            />
-            Muat Ulang
-          </button>
-        )}
       </div>
 
-      {dataError && tab !== 'profil' && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs sm:text-sm text-rose-700 font-medium"
-        >
-          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-          <span>{dataError}</span>
+      {/* Ringkasan Identitas */}
+      <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#1D63D8] flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-bold text-[#17325C] truncate">
+                {user.fullName}
+              </h2>
+              <p className="text-xs text-slate-500 truncate">
+                {isOperator ? 'Operator / Admin' : 'Guru'} · {user.username}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            disabled={loggingOut}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-60 px-3.5 py-2 text-xs font-bold text-rose-700 cursor-pointer whitespace-nowrap shrink-0 min-h-[40px]"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            {loggingOut ? 'Keluar...' : 'Logout'}
+          </button>
         </div>
-      )}
 
-      {tab === 'riwayat' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="rounded-2xl bg-white border border-slate-200/90 p-4">
-              <p className="text-xs text-slate-500">Siswa</p>
-              <p className="mt-1 text-2xl font-extrabold text-[#17325C] tabular-nums">
-                {students.length}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-white border border-slate-200/90 p-4">
-              <p className="text-xs text-slate-500">Guru &amp; Tendik</p>
-              <p className="mt-1 text-2xl font-extrabold text-[#17325C] tabular-nums">
-                {teachers.length}
-              </p>
-            </div>
-            {isOperator && (
-              <div className="rounded-2xl bg-white border border-slate-200/90 p-4 col-span-2 sm:col-span-1">
-                <p className="text-xs text-slate-500">Arsip Surat</p>
-                <p className="mt-1 text-2xl font-extrabold text-[#17325C] tabular-nums">
-                  {letters.length}
-                </p>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2.5 border-t border-slate-100 text-xs">
+          <div>
+            <span className="text-slate-500 block">NIP</span>
+            <span className="font-semibold text-slate-900 tabular-nums">
+              {user.nip || '-'}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block">Email</span>
+            <span className="font-semibold text-slate-900 break-all">
+              {user.email || '-'}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block">Sekolah</span>
+            <span className="font-semibold text-slate-900">
+              {school.schoolName || '-'}
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-500 block">
+              {!isOperator ? 'Kelas yang Dipegang' : 'Kota'}
+            </span>
+            {!isOperator ? (
+              <span className="font-bold text-[#17325C]">
+                {user.assignedClass || 'Belum dipilih'}
+              </span>
+            ) : (
+              <span className="font-semibold text-slate-900">
+                {school.city || '-'}
+              </span>
             )}
           </div>
-
-          {isOperator && (
-            <section className="rounded-2xl bg-white border border-slate-200/90 p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-bold text-[#17325C]">Surat Terbaru</h2>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('surat')}
-                  className="rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700 cursor-pointer whitespace-nowrap"
-                >
-                  Menu Surat
-                </button>
-              </div>
-              {loadingData ? (
-                <p className="text-xs text-slate-500 py-3">Memuat...</p>
-              ) : letters.length === 0 ? (
-                <p className="text-xs text-slate-500 py-2">
-                  Belum ada surat tersimpan.
-                </p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {letters.slice(0, 8).map((item) => (
-                    <div
-                      key={item.id}
-                      className="py-2.5 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                          {item.recipientName || '-'}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate">
-                          {item.title} · {item.letterNumber || '-'} ·{' '}
-                          {formatDateShort(item.updatedAt)}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('surat')}
-                        className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                      >
-                        Buka
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          <section className="rounded-2xl bg-white border border-slate-200/90 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-bold text-[#17325C]">Riwayat Absen</h2>
-              <div className="flex items-center gap-2">
-                {(attendanceInfo?.rombels.length || 0) > 0 && (
-                  <select
-                    value={selectedRombel || attendanceInfo?.selectedRombel || ''}
-                    onChange={(e) => setSelectedRombel(e.target.value)}
-                    aria-label="Pilih Kelas"
-                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
-                  >
-                    {attendanceInfo?.rombels.map((rb) => (
-                      <option key={rb} value={rb}>
-                        {rb}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onNavigate('absen-siswa')}
-                  className="rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700 cursor-pointer whitespace-nowrap"
-                >
-                  Buka Absen
-                </button>
-              </div>
-            </div>
-
-            {loadingData ? (
-              <p className="text-xs text-slate-500 py-3">Memuat...</p>
-            ) : !attendanceInfo ||
-              attendanceInfo.savedDatesForRombel.length === 0 ? (
-              <p className="text-xs text-slate-500 py-2">
-                Belum ada riwayat absen tersimpan.
-              </p>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {attendanceInfo.savedDatesForRombel.slice(0, 10).map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="py-2.5 flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-bold text-slate-900 tabular-nums">
-                        {formatDateShort(entry.date)}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {attendanceInfo.selectedRombel} · Diperbarui oleh{' '}
-                        {entry.updatedBy || '-'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('absen-siswa')}
-                      className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                    >
-                      Buka
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
-      )}
+      </section>
 
-      {tab === 'scan-qr' && (
-        <div className="space-y-4">
-          <section className="rounded-2xl bg-white border border-slate-200/90 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-bold text-[#17325C]">
-                Kamera &amp; Cari Cepat
-              </h2>
-              <button
-                type="button"
-                onClick={cameraActive ? stopCamera : startCamera}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold cursor-pointer whitespace-nowrap ${
-                  cameraActive
-                    ? 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
-                    : 'bg-[#1D63D8] text-white hover:bg-[#1753B8]'
-                }`}
+      {/* Edit Data Profil Saya */}
+      <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <PencilLine className="w-4 h-4 text-[#1D63D8]" />
+            <h2 className="text-sm font-bold text-[#17325C]">
+              Edit Data Profil Saya
+            </h2>
+          </div>
+          {!isOperator && (
+            <span className="text-[11px] text-slate-500">
+              Perubahan otomatis dikirim ke notifikasi Admin
+            </span>
+          )}
+        </div>
+
+        {profileSuccess && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs text-emerald-800 font-medium"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{profileSuccess}</span>
+          </div>
+        )}
+
+        {profileError && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-700 font-medium"
+          >
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{profileError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveProfile} className="space-y-4" noValidate>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div>
+              <label
+                htmlFor="profil-edit-fullname"
+                className="block text-xs font-semibold text-slate-700 mb-1"
               >
-                {cameraActive ? (
-                  <>
-                    <CameraOff className="w-4 h-4" />
-                    Stop Kamera
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-4 h-4" />
-                    Aktifkan Kamera
-                  </>
-                )}
-              </button>
-            </div>
-
-            {cameraActive && (
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-950 aspect-video max-h-64 flex items-center justify-center">
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            )}
-
-            {cameraError && (
-              <p className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                {cameraError}
-              </p>
-            )}
-
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                Nama Lengkap <span className="text-rose-500">*</span>
+              </label>
               <input
-                type="search"
-                value={qrQuery}
-                onChange={(e) => setQrQuery(e.target.value)}
-                placeholder="Scan QR atau ketik NISN, NIPD, NIP, Nama, Nomor Surat..."
-                className="w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                id="profil-edit-fullname"
+                type="text"
+                value={fullName}
+                disabled={profileLoading || profileSubmitting}
+                onChange={(e) => {
+                  setFullName(e.target.value);
+                  setProfileError(null);
+                  setProfileSuccess(null);
+                }}
+                required
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
               />
             </div>
-          </section>
 
-          {qrQuery.trim() && (
-            <section className="rounded-2xl bg-white border border-slate-200/90 p-4 space-y-3">
-              <h2 className="text-sm font-bold text-[#17325C]">Hasil</h2>
-
-              {scanMatches.students.length === 0 &&
-              scanMatches.teachers.length === 0 &&
-              scanMatches.letters.length === 0 ? (
-                <p className="text-xs text-slate-500 py-2">
-                  Data tidak ditemukan.
-                </p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {scanMatches.students.map((s) => (
-                    <div
-                      key={`st-${s.id}`}
-                      className="py-2.5 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                          {s.nama}
-                        </p>
-                        <p className="text-xs text-slate-500 tabular-nums truncate">
-                          Siswa · {s.rombelSaatIni || '-'} · NISN{' '}
-                          {s.nisn || '-'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('siswa')}
-                        className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                      >
-                        Siswa
-                      </button>
-                    </div>
-                  ))}
-                  {scanMatches.teachers.map((t) => (
-                    <div
-                      key={`tc-${t.id}`}
-                      className="py-2.5 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                          {t.nama}
-                        </p>
-                        <p className="text-xs text-slate-500 tabular-nums truncate">
-                          {t.jenisPtk || 'PTK'} · NIP {t.nip || '-'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('guru')}
-                        className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                      >
-                        Guru
-                      </button>
-                    </div>
-                  ))}
-                  {scanMatches.letters.map((l) => (
-                    <div
-                      key={`lt-${l.id}`}
-                      className="py-2.5 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                          {l.letterNumber || '-'}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate">
-                          {l.title} · {l.recipientName || '-'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('surat')}
-                        className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap shrink-0"
-                      >
-                        Surat
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-        </div>
-      )}
-
-      {tab === 'notifikasi' && (
-        <section className="rounded-2xl bg-white border border-slate-200/90 p-4 space-y-3">
-          {loadingData ? (
-            <p className="text-xs text-slate-500 py-4 text-center">
-              Memeriksa data...
-            </p>
-          ) : notifications.length === 0 ? (
-            <div className="flex items-center gap-2.5 py-4 justify-center text-emerald-700 text-xs sm:text-sm font-semibold">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Semua data sudah lengkap.</span>
+            <div>
+              <label
+                htmlFor="profil-edit-nip"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                NIP
+              </label>
+              <input
+                id="profil-edit-nip"
+                type="text"
+                value={nip}
+                disabled={profileLoading || profileSubmitting}
+                onChange={(e) => {
+                  setNip(e.target.value);
+                  setProfileError(null);
+                  setProfileSuccess(null);
+                }}
+                placeholder="18 digit angka (opsional)"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+              />
             </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {notifications.map((item) => (
-                <div
-                  key={item.id}
-                  className="py-3 flex items-center justify-between gap-3"
+
+            <div>
+              <label
+                htmlFor="profil-edit-email"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Email
+              </label>
+              <input
+                id="profil-edit-email"
+                type="email"
+                value={email}
+                disabled={profileLoading || profileSubmitting}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setProfileError(null);
+                  setProfileSuccess(null);
+                }}
+                placeholder="nama@sekolah.sch.id"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+              />
+            </div>
+          </div>
+
+          {linkedTeacher && (
+            <div className="pt-2 border-t border-slate-100 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold text-[#17325C]">
+                    Biodata Pribadi &amp; Kontak Guru
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Terhubung dengan data {linkedTeacher.jenisPtk || 'Guru'} ·{' '}
+                    {linkedTeacher.statusKepegawaian || 'PTK'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBiodataFields((p) => !p)}
+                  className="rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-semibold text-[#1D63D8] cursor-pointer whitespace-nowrap"
                 >
-                  <div className="flex items-start gap-2.5 min-w-0">
-                    {item.tone === 'amber' ? (
-                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <FileText className="w-4 h-4 text-[#1D63D8] shrink-0 mt-0.5" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-bold text-slate-900">
-                        {item.title}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {item.detail}
-                      </p>
+                  {showBiodataFields
+                    ? 'Sembunyikan Biodata Lengkap'
+                    : 'Edit Biodata Lengkap'}
+                </button>
+              </div>
+
+              {showBiodataFields && (
+                <div className="space-y-4 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        NUPTK
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.nuptk}
+                        onChange={(e) => setBioField('nuptk', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Jenis Kelamin
+                      </label>
+                      <select
+                        value={bioForm.jk}
+                        onChange={(e) => setBioField('jk', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      >
+                        <option value="">Pilih JK</option>
+                        <option value="L">L (Laki-laki)</option>
+                        <option value="P">P (Perempuan)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Agama
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.agama}
+                        onChange={(e) => setBioField('agama', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Tempat Lahir
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.tempatLahir}
+                        onChange={(e) => setBioField('tempatLahir', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Tanggal Lahir
+                      </label>
+                      <input
+                        type="date"
+                        value={
+                          /^\d{4}-\d{2}-\d{2}$/.test(bioForm.tanggalLahir)
+                            ? bioForm.tanggalLahir
+                            : ''
+                        }
+                        onChange={(e) => setBioField('tanggalLahir', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        No. HP
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.hp}
+                        onChange={(e) => setBioField('hp', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Telepon
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.telepon}
+                        onChange={(e) => setBioField('telepon', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Alamat Jalan
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.alamatJalan}
+                        onChange={(e) => setBioField('alamatJalan', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        RT
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.rt}
+                        onChange={(e) => setBioField('rt', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        RW
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.rw}
+                        onChange={(e) => setBioField('rw', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Dusun
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.namaDusun}
+                        onChange={(e) => setBioField('namaDusun', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Desa / Kelurahan
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.desaKelurahan}
+                        onChange={(e) => setBioField('desaKelurahan', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Kecamatan
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.kecamatan}
+                        onChange={(e) => setBioField('kecamatan', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Kode Pos
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.kodePos}
+                        onChange={(e) => setBioField('kodePos', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Nama Ibu Kandung
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.namaIbuKandung}
+                        onChange={(e) =>
+                          setBioField('namaIbuKandung', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Status Perkawinan
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.statusPerkawinan}
+                        onChange={(e) =>
+                          setBioField('statusPerkawinan', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Nama Suami / Istri
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.namaSuamiIstri}
+                        onChange={(e) =>
+                          setBioField('namaSuamiIstri', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Pekerjaan Suami / Istri
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.pekerjaanSuamiIstri}
+                        onChange={(e) =>
+                          setBioField('pekerjaanSuamiIstri', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Kewarganegaraan
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.kewarganegaraan}
+                        onChange={(e) =>
+                          setBioField('kewarganegaraan', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Nama Bank
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.bank}
+                        onChange={(e) => setBioField('bank', e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Rekening Atas Nama
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.rekeningAtasNama}
+                        onChange={(e) =>
+                          setBioField('rekeningAtasNama', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Nama Wajib Pajak
+                      </label>
+                      <input
+                        type="text"
+                        value={bioForm.namaWajibPajak}
+                        onChange={(e) =>
+                          setBioField('namaWajibPajak', e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                      />
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(item.target)}
-                    className="rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700 cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    {item.actionLabel}
-                  </button>
+
+                  {(isMaskedValue(linkedTeacher.nik) ||
+                    isMaskedValue(linkedTeacher.noKk) ||
+                    isMaskedValue(linkedTeacher.npwp) ||
+                    isMaskedValue(linkedTeacher.nomorRekeningBank)) && (
+                    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[11px] text-slate-600">
+                      <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                      <span>
+                        Data sensitif (NIK, No. KK, NPWP, Nomor Rekening, Karpeg)
+                        dilindungi dan hanya dapat diubah oleh Operator.
+                      </span>
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
             </div>
           )}
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={profileLoading || profileSubmitting}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1D63D8] hover:bg-[#1753B8] disabled:opacity-60 px-4 py-2 text-xs sm:text-sm font-bold text-white cursor-pointer whitespace-nowrap min-h-[40px]"
+            >
+              <Save className="w-4 h-4" />
+              {profileSubmitting ? 'Menyimpan...' : 'Simpan Profil'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {!isOperator && (
+        <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-[#1D63D8]" />
+              <h2 className="text-sm font-bold text-[#17325C]">
+                Kelas yang Dipegang
+              </h2>
+            </div>
+            <span className="text-[11px] font-semibold text-slate-500">
+              1 guru hanya 1 kelas
+            </span>
+          </div>
+
+          {classSuccess && (
+            <div
+              role="status"
+              className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs text-emerald-800 font-medium"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{classSuccess}</span>
+            </div>
+          )}
+
+          {classError && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-700 font-medium"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{classError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSaveAssignedClass} className="space-y-3">
+            <div>
+              <label
+                htmlFor="profil-assigned-class"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Pilih Kelas / Rombel
+              </label>
+              {classOptions.length > 0 ? (
+                <select
+                  id="profil-assigned-class"
+                  value={selectedAssignedClass}
+                  disabled={classOptionsLoading || classSubmitting}
+                  onChange={(e) => {
+                    setSelectedAssignedClass(e.target.value);
+                    setClassError(null);
+                    setClassSuccess(null);
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                >
+                  <option value="">-- Belum Memegang Kelas --</option>
+                  {selectedAssignedClass &&
+                    !classOptions.some(
+                      (o) =>
+                        o.name.trim().toLowerCase() ===
+                        selectedAssignedClass.trim().toLowerCase()
+                    ) && (
+                      <option value={selectedAssignedClass}>
+                        {selectedAssignedClass}
+                      </option>
+                    )}
+                  {classOptions.map((opt) => {
+                    const takenByOther =
+                      Boolean(opt.occupiedByName) && !opt.isMine;
+                    return (
+                      <option
+                        key={opt.name}
+                        value={opt.name}
+                        disabled={takenByOther}
+                      >
+                        {opt.name}
+                        {takenByOther
+                          ? ` (Sudah dipegang: ${opt.occupiedByName})`
+                          : opt.isMine
+                            ? ' (Kelas Anda)'
+                            : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                <input
+                  id="profil-assigned-class"
+                  type="text"
+                  value={selectedAssignedClass}
+                  disabled={classSubmitting}
+                  onChange={(e) => {
+                    setSelectedAssignedClass(e.target.value);
+                    setClassError(null);
+                    setClassSuccess(null);
+                  }}
+                  placeholder="Contoh: 1A atau IV B (kosongkan jika tidak memegang kelas)"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                />
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                Anda dapat melihat, mengedit, dan mengisi absen siswa sesuai kelas ini.
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={classSubmitting || classOptionsLoading}
+                className="rounded-xl bg-[#1D63D8] hover:bg-[#1753B8] disabled:opacity-60 px-4 py-2 text-xs sm:text-sm font-bold text-white cursor-pointer whitespace-nowrap min-h-[40px]"
+              >
+                {classSubmitting ? 'Menyimpan...' : 'Simpan Kelas'}
+              </button>
+            </div>
+          </form>
         </section>
       )}
 
-      {tab === 'profil' && (
-        <div className="space-y-4">
-          <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#1D63D8] flex items-center justify-center shrink-0">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-sm sm:text-base font-bold text-[#17325C] truncate">
-                    {user.fullName}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    {isOperator ? 'Operator' : 'Guru'} · {user.username}
-                  </p>
-                </div>
-              </div>
+      {/* Ganti Password */}
+      <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
+        <div className="flex items-center gap-2">
+          <KeyRound className="w-4 h-4 text-[#1D63D8]" />
+          <h2 className="text-sm font-bold text-[#17325C]">
+            Ganti Password
+          </h2>
+        </div>
+
+        {pwSuccess && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs text-emerald-800 font-medium"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{pwSuccess}</span>
+          </div>
+        )}
+
+        {pwError && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-700 font-medium"
+          >
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{pwError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handlePasswordSubmit} className="space-y-3" noValidate>
+          <div>
+            <label
+              htmlFor="profil-current-password"
+              className="block text-xs font-semibold text-slate-700 mb-1"
+            >
+              Password Saat Ini
+            </label>
+            <div className="relative">
+              <input
+                id="profil-current-password"
+                type={showCurrent ? 'text' : 'password'}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+              />
               <button
                 type="button"
-                onClick={onLogout}
-                disabled={loggingOut}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-60 px-3.5 py-2 text-xs font-bold text-rose-700 cursor-pointer whitespace-nowrap shrink-0"
+                onClick={() => setShowCurrent((p) => !p)}
+                aria-label={
+                  showCurrent ? 'Sembunyikan password' : 'Tampilkan password'
+                }
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                {loggingOut ? 'Keluar...' : 'Logout'}
+                {showCurrent ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
               </button>
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100 text-xs">
-              <div>
-                <span className="text-slate-500 block">NIP</span>
-                <span className="font-semibold text-slate-900 tabular-nums">
-                  {user.nip || '-'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Email</span>
-                <span className="font-semibold text-slate-900 break-all">
-                  {user.email || '-'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Sekolah</span>
-                <span className="font-semibold text-slate-900">
-                  {school.schoolName || '-'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Kota</span>
-                <span className="font-semibold text-slate-900">
-                  {school.city || '-'}
-                </span>
-              </div>
-              {!isOperator && (
-                <div className="sm:col-span-2">
-                  <span className="text-slate-500 block">Kelas yang Dipegang</span>
-                  <span className="inline-flex mt-0.5 items-center rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 font-bold text-[#17325C]">
-                    {user.assignedClass || 'Belum dipilih'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {!isOperator && (
-            <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-[#1D63D8]" />
-                  <h2 className="text-sm font-bold text-[#17325C]">
-                    Kelas yang Dipegang
-                  </h2>
-                </div>
-                <span className="text-[11px] font-semibold text-slate-500">
-                  1 guru hanya 1 kelas
-                </span>
-              </div>
-
-              {classSuccess && (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs text-emerald-800 font-medium"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{classSuccess}</span>
-                </div>
-              )}
-
-              {classError && (
-                <div
-                  role="alert"
-                  className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-700 font-medium"
-                >
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>{classError}</span>
-                </div>
-              )}
-
-              <form onSubmit={handleSaveAssignedClass} className="space-y-3">
-                <div>
-                  <label
-                    htmlFor="profil-assigned-class"
-                    className="block text-xs font-semibold text-slate-700 mb-1"
-                  >
-                    Pilih Kelas / Rombel
-                  </label>
-                  {classOptions.length > 0 ? (
-                    <select
-                      id="profil-assigned-class"
-                      value={selectedAssignedClass}
-                      disabled={classOptionsLoading || classSubmitting}
-                      onChange={(e) => {
-                        setSelectedAssignedClass(e.target.value);
-                        setClassError(null);
-                        setClassSuccess(null);
-                      }}
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
-                    >
-                      <option value="">-- Belum Memegang Kelas --</option>
-                      {selectedAssignedClass &&
-                        !classOptions.some(
-                          (o) =>
-                            o.name.trim().toLowerCase() ===
-                            selectedAssignedClass.trim().toLowerCase()
-                        ) && (
-                          <option value={selectedAssignedClass}>
-                            {selectedAssignedClass}
-                          </option>
-                        )}
-                      {classOptions.map((opt) => {
-                        const takenByOther =
-                          Boolean(opt.occupiedByName) && !opt.isMine;
-                        return (
-                          <option
-                            key={opt.name}
-                            value={opt.name}
-                            disabled={takenByOther}
-                          >
-                            {opt.name}
-                            {takenByOther
-                              ? ` (Sudah dipegang: ${opt.occupiedByName})`
-                              : opt.isMine
-                                ? ' (Kelas Anda)'
-                                : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : (
-                    <input
-                      id="profil-assigned-class"
-                      type="text"
-                      value={selectedAssignedClass}
-                      disabled={classSubmitting}
-                      onChange={(e) => {
-                        setSelectedAssignedClass(e.target.value);
-                        setClassError(null);
-                        setClassSuccess(null);
-                      }}
-                      placeholder="Contoh: 1A atau IV B (kosongkan jika tidak memegang kelas)"
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
-                    />
-                  )}
-                  <p className="mt-1.5 text-[11px] text-slate-500">
-                    Anda hanya dapat mengakses data siswa dan absen sesuai kelas ini.
-                  </p>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={classSubmitting || classOptionsLoading}
-                    className="rounded-xl bg-[#1D63D8] hover:bg-[#1753B8] disabled:opacity-60 px-4 py-2 text-xs sm:text-sm font-bold text-white cursor-pointer whitespace-nowrap"
-                  >
-                    {classSubmitting ? 'Menyimpan...' : 'Simpan Kelas'}
-                  </button>
-                </div>
-              </form>
-            </section>
-          )}
-
-          <section className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 space-y-3.5">
-            <div className="flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-[#1D63D8]" />
-              <h2 className="text-sm font-bold text-[#17325C]">
-                Ganti Password
-              </h2>
-            </div>
-
-            {pwSuccess && (
-              <div
-                role="status"
-                className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs text-emerald-800 font-medium"
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor="profil-new-password"
+                className="block text-xs font-semibold text-slate-700 mb-1"
               >
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{pwSuccess}</span>
-              </div>
-            )}
-
-            {pwError && (
-              <div
-                role="alert"
-                className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-700 font-medium"
-              >
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{pwError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handlePasswordSubmit} className="space-y-3" noValidate>
-              <div>
-                <label
-                  htmlFor="profil-current-password"
-                  className="block text-xs font-semibold text-slate-700 mb-1"
-                >
-                  Password Saat Ini
-                </label>
-                <div className="relative">
-                  <input
-                    id="profil-current-password"
-                    type={showCurrent ? 'text' : 'password'}
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    autoComplete="current-password"
-                    className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrent((p) => !p)}
-                    aria-label={
-                      showCurrent ? 'Sembunyikan password' : 'Tampilkan password'
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
-                  >
-                    {showCurrent ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="profil-new-password"
-                    className="block text-xs font-semibold text-slate-700 mb-1"
-                  >
-                    Password Baru
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="profil-new-password"
-                      type={showNew ? 'text' : 'password'}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      autoComplete="new-password"
-                      className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNew((p) => !p)}
-                      aria-label={
-                        showNew ? 'Sembunyikan password baru' : 'Tampilkan password baru'
-                      }
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
-                    >
-                      {showNew ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="profil-confirm-password"
-                    className="block text-xs font-semibold text-slate-700 mb-1"
-                  >
-                    Konfirmasi Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="profil-confirm-password"
-                      type={showConfirm ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      autoComplete="new-password"
-                      className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirm((p) => !p)}
-                      aria-label={
-                        showConfirm
-                          ? 'Sembunyikan konfirmasi password'
-                          : 'Tampilkan konfirmasi password'
-                      }
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
-                    >
-                      {showConfirm ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
+                Password Baru
+              </label>
+              <div className="relative">
+                <input
+                  id="profil-new-password"
+                  type={showNew ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                />
                 <button
-                  type="submit"
-                  disabled={pwSubmitting}
-                  className="rounded-xl bg-[#1D63D8] hover:bg-[#1753B8] disabled:opacity-60 px-4 py-2 text-xs sm:text-sm font-bold text-white cursor-pointer whitespace-nowrap"
+                  type="button"
+                  onClick={() => setShowNew((p) => !p)}
+                  aria-label={
+                    showNew ? 'Sembunyikan password baru' : 'Tampilkan password baru'
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
                 >
-                  {pwSubmitting ? 'Menyimpan...' : 'Simpan'}
+                  {showNew ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
-            </form>
-          </section>
-        </div>
-      )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="profil-confirm-password"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Konfirmasi Password
+              </label>
+              <div className="relative">
+                <input
+                  id="profil-confirm-password"
+                  type={showConfirm ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-slate-300 bg-white pl-3.5 pr-10 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm((p) => !p)}
+                  aria-label={
+                    showConfirm
+                      ? 'Sembunyikan konfirmasi password'
+                      : 'Tampilkan konfirmasi password'
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  {showConfirm ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={pwSubmitting}
+              className="rounded-xl bg-[#1D63D8] hover:bg-[#1753B8] disabled:opacity-60 px-4 py-2 text-xs sm:text-sm font-bold text-white cursor-pointer whitespace-nowrap min-h-[40px]"
+            >
+              {pwSubmitting ? 'Menyimpan...' : 'Simpan Password'}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   );
 };

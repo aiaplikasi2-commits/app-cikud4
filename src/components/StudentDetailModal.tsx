@@ -107,7 +107,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                 Buat Surat
               </button>
             )}
-            {userRole === 'OPERATOR' && onEdit && (
+            {onEdit && (
               <button
                 type="button"
                 onClick={onEdit}

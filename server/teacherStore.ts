@@ -111,6 +111,81 @@ function maskSensitiveDigits(value: string): string {
   )}${trimmed.slice(-4)}`;
 }
 
+function hasMaskBullet(val: string): boolean {
+  return val.includes('•');
+}
+
+function preserveMaskedTeacherFields(
+  existing: TeacherRecord,
+  payload: TeacherInputPayload
+): TeacherInputPayload {
+  return {
+    ...payload,
+    nik: hasMaskBullet(payload.nik) ? existing.nik : payload.nik,
+    noKk: hasMaskBullet(payload.noKk) ? existing.noKk : payload.noKk,
+    npwp: hasMaskBullet(payload.npwp) ? existing.npwp : payload.npwp,
+    nomorRekeningBank: hasMaskBullet(payload.nomorRekeningBank)
+      ? existing.nomorRekeningBank
+      : payload.nomorRekeningBank,
+    nipSuamiIstri: hasMaskBullet(payload.nipSuamiIstri)
+      ? existing.nipSuamiIstri
+      : payload.nipSuamiIstri,
+    karpeg: hasMaskBullet(payload.karpeg) ? existing.karpeg : payload.karpeg,
+    karisKarsu: hasMaskBullet(payload.karisKarsu)
+      ? existing.karisKarsu
+      : payload.karisKarsu,
+  };
+}
+
+function diffTeacherFields(
+  existing: TeacherRecord,
+  next: TeacherInputPayload
+): string[] {
+  const changed: string[] = [];
+  const check = (label: string, prevVal: string, nextVal: string) => {
+    if (cleanStr(prevVal) !== cleanStr(nextVal)) {
+      changed.push(label);
+    }
+  };
+
+  check('Nama Lengkap', existing.nama, next.nama);
+  check('NUPTK', existing.nuptk, next.nuptk);
+  check('Jenis Kelamin', existing.jk, next.jk);
+  check('Tempat Lahir', existing.tempatLahir, next.tempatLahir);
+  check('Tanggal Lahir', existing.tanggalLahir, next.tanggalLahir);
+  check('NIP', existing.nip, next.nip);
+  check('Agama', existing.agama, next.agama);
+  check('Alamat Jalan', existing.alamatJalan, next.alamatJalan);
+  check('RT', existing.rt, next.rt);
+  check('RW', existing.rw, next.rw);
+  check('Dusun', existing.namaDusun, next.namaDusun);
+  check('Desa/Kelurahan', existing.desaKelurahan, next.desaKelurahan);
+  check('Kecamatan', existing.kecamatan, next.kecamatan);
+  check('Kode Pos', existing.kodePos, next.kodePos);
+  check('Telepon', existing.telepon, next.telepon);
+  check('No. HP', existing.hp, next.hp);
+  check('Email', existing.email, next.email);
+  check('Nama Ibu Kandung', existing.namaIbuKandung, next.namaIbuKandung);
+  check('Status Perkawinan', existing.statusPerkawinan, next.statusPerkawinan);
+  check('Nama Suami/Istri', existing.namaSuamiIstri, next.namaSuamiIstri);
+  check('NIP Suami/Istri', existing.nipSuamiIstri, next.nipSuamiIstri);
+  check('Pekerjaan Suami/Istri', existing.pekerjaanSuamiIstri, next.pekerjaanSuamiIstri);
+  check('NPWP', existing.npwp, next.npwp);
+  check('Nama Wajib Pajak', existing.namaWajibPajak, next.namaWajibPajak);
+  check('Kewarganegaraan', existing.kewarganegaraan, next.kewarganegaraan);
+  check('Bank', existing.bank, next.bank);
+  check('Nomor Rekening', existing.nomorRekeningBank, next.nomorRekeningBank);
+  check('Rekening Atas Nama', existing.rekeningAtasNama, next.rekeningAtasNama);
+  check('NIK', existing.nik, next.nik);
+  check('No. KK', existing.noKk, next.noKk);
+  check('Karpeg', existing.karpeg, next.karpeg);
+  check('Karis/Karsu', existing.karisKarsu, next.karisKarsu);
+  check('Lintang', existing.lintang, next.lintang);
+  check('Bujur', existing.bujur, next.bujur);
+
+  return changed;
+}
+
 function maskTeacherForNonOperator(record: TeacherRecord): TeacherRecord {
   return {
     ...record,
@@ -365,6 +440,104 @@ export function createTeacherStore(storageDir: string) {
     all[index] = updated;
     writeAllAtomic(all);
     return updated;
+  }
+
+  function updateTeacherSelfProfile(
+    teacherId: string,
+    input: Partial<TeacherInputPayload>
+  ): {
+    teacher: TeacherRecord;
+    rawUpdated: TeacherRecord;
+    changedFields: string[];
+  } {
+    const all = readAll();
+    const index = all.findIndex((t) => t.id === teacherId);
+    if (index === -1) {
+      throw new TeacherStoreError(404, 'Data profil guru tidak ditemukan.');
+    }
+
+    const existing = all[index];
+    const mergedRaw: Partial<TeacherInputPayload> = {
+      ...existing,
+      ...(input.nama !== undefined ? { nama: input.nama } : {}),
+      ...(input.nuptk !== undefined ? { nuptk: input.nuptk } : {}),
+      ...(input.jk !== undefined ? { jk: input.jk } : {}),
+      ...(input.tempatLahir !== undefined ? { tempatLahir: input.tempatLahir } : {}),
+      ...(input.tanggalLahir !== undefined ? { tanggalLahir: input.tanggalLahir } : {}),
+      ...(input.nip !== undefined ? { nip: input.nip } : {}),
+      ...(input.agama !== undefined ? { agama: input.agama } : {}),
+      ...(input.alamatJalan !== undefined ? { alamatJalan: input.alamatJalan } : {}),
+      ...(input.rt !== undefined ? { rt: input.rt } : {}),
+      ...(input.rw !== undefined ? { rw: input.rw } : {}),
+      ...(input.namaDusun !== undefined ? { namaDusun: input.namaDusun } : {}),
+      ...(input.desaKelurahan !== undefined ? { desaKelurahan: input.desaKelurahan } : {}),
+      ...(input.kecamatan !== undefined ? { kecamatan: input.kecamatan } : {}),
+      ...(input.kodePos !== undefined ? { kodePos: input.kodePos } : {}),
+      ...(input.telepon !== undefined ? { telepon: input.telepon } : {}),
+      ...(input.hp !== undefined ? { hp: input.hp } : {}),
+      ...(input.email !== undefined ? { email: input.email } : {}),
+      ...(input.namaIbuKandung !== undefined ? { namaIbuKandung: input.namaIbuKandung } : {}),
+      ...(input.statusPerkawinan !== undefined ? { statusPerkawinan: input.statusPerkawinan } : {}),
+      ...(input.namaSuamiIstri !== undefined ? { namaSuamiIstri: input.namaSuamiIstri } : {}),
+      ...(input.nipSuamiIstri !== undefined ? { nipSuamiIstri: input.nipSuamiIstri } : {}),
+      ...(input.pekerjaanSuamiIstri !== undefined ? { pekerjaanSuamiIstri: input.pekerjaanSuamiIstri } : {}),
+      ...(input.npwp !== undefined ? { npwp: input.npwp } : {}),
+      ...(input.namaWajibPajak !== undefined ? { namaWajibPajak: input.namaWajibPajak } : {}),
+      ...(input.kewarganegaraan !== undefined ? { kewarganegaraan: input.kewarganegaraan } : {}),
+      ...(input.bank !== undefined ? { bank: input.bank } : {}),
+      ...(input.nomorRekeningBank !== undefined ? { nomorRekeningBank: input.nomorRekeningBank } : {}),
+      ...(input.rekeningAtasNama !== undefined ? { rekeningAtasNama: input.rekeningAtasNama } : {}),
+      ...(input.nik !== undefined ? { nik: input.nik } : {}),
+      ...(input.noKk !== undefined ? { noKk: input.noKk } : {}),
+      ...(input.karpeg !== undefined ? { karpeg: input.karpeg } : {}),
+      ...(input.karisKarsu !== undefined ? { karisKarsu: input.karisKarsu } : {}),
+      ...(input.lintang !== undefined ? { lintang: input.lintang } : {}),
+      ...(input.bujur !== undefined ? { bujur: input.bujur } : {}),
+      // Lock administrative fields against self-edit
+      no: existing.no,
+      statusKepegawaian: existing.statusKepegawaian,
+      jenisPtk: existing.jenisPtk,
+      tugasTambahan: existing.tugasTambahan,
+      skCpns: existing.skCpns,
+      tanggalCpns: existing.tanggalCpns,
+      skPengangkatan: existing.skPengangkatan,
+      tmtPengangkatan: existing.tmtPengangkatan,
+      lembagaPengangkatan: existing.lembagaPengangkatan,
+      pangkatGolongan: existing.pangkatGolongan,
+      sumberGaji: existing.sumberGaji,
+      tmtPns: existing.tmtPns,
+      sudahLisensi: existing.sudahLisensi,
+      kepalaSekolah: existing.kepalaSekolah,
+      pernahDiklatKepengawasan: existing.pernahDiklatKepengawasan,
+      keahlianBraille: existing.keahlianBraille,
+      keahlianBahasaIsyarat: existing.keahlianBahasaIsyarat,
+      nuks: existing.nuks,
+      assignedClass: existing.assignedClass,
+    };
+
+    const sanitized = sanitizeTeacherPayload(mergedRaw);
+    const payload = preserveMaskedTeacherFields(existing, sanitized);
+    validateUniqueIdentifiers(all, payload, teacherId);
+
+    const changedFields = diffTeacherFields(existing, payload);
+    const updated: TeacherRecord = {
+      ...existing,
+      ...payload,
+      id: existing.id,
+      linkedAccountId: existing.linkedAccountId ?? null,
+      assignedClass: existing.assignedClass ?? '',
+      statusData: computeStatusData(payload),
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    all[index] = updated;
+    writeAllAtomic(all);
+    return {
+      teacher: maskTeacherForNonOperator(updated),
+      rawUpdated: updated,
+      changedFields,
+    };
   }
 
   function deleteTeacher(id: string): void {
@@ -724,6 +897,7 @@ export function createTeacherStore(storageDir: string) {
     getTeacherById,
     createTeacher,
     updateTeacher,
+    updateTeacherSelfProfile,
     deleteTeacher,
     setLinkedAccountId,
     setLinkedAccountIdsBatch,

@@ -332,6 +332,36 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'id', 'type', 'actorUserId', 'actorName', 'actorUsername',
+          'title', 'summary', 'targetId', 'targetName', 'changedFields',
+          'eventDate', 'readAt', 'clientCreatedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'id', 'type', 'actorUserId', 'actorName', 'actorUsername',
+          'title', 'summary', 'targetId', 'targetName', 'changedFields',
+          'eventDate', 'readAt', 'clientCreatedAt', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerUid)
+        && isValidId(data.id)
+        && data.type in ['STUDENT_UPDATED', 'TEACHER_PROFILE_UPDATED', 'AGENDA_CREATED']
+        && isValidStr(data.actorUserId, 128)
+        && isValidStr(data.actorName, 150) && data.actorName.size() >= 1
+        && isValidStr(data.actorUsername, 60)
+        && isValidStr(data.title, 200) && data.title.size() >= 1
+        && isValidStr(data.summary, 600)
+        && isValidStr(data.targetId, 128)
+        && isValidStr(data.targetName, 200)
+        && data.changedFields is list && data.changedFields.size() <= 40
+        && (data.changedFields.size() == 0 || data.changedFields[0] is string)
+        && isValidStr(data.eventDate, 40)
+        && isValidStr(data.readAt, 64)
+        && isValidStr(data.clientCreatedAt, 64)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
     match /schools/{schoolId} {
       allow get: if isSignedIn() && isValidId(schoolId) && (isAdmin() || existing().ownerUid == request.auth.uid);
@@ -525,6 +555,29 @@ service cloud.firestore {
             ]))
           );
         allow delete: if isSignedIn() && isValidId(schoolId) && isValidId(agendaId) && (isAdmin() || existing().ownerUid == request.auth.uid);
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isSignedIn() && isValidId(schoolId) && isValidId(notificationId) && (isAdmin() || existing().ownerUid == request.auth.uid);
+        allow list: if isSignedIn() && (isAdmin() || existing().ownerUid == request.auth.uid);
+        allow create: if isSignedIn() && isValidId(schoolId) && isValidId(notificationId) && isValidNotification(incoming())
+          && schoolExists(schoolId) && isSchoolOwner(schoolId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().id == notificationId
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isSignedIn() && isValidId(schoolId) && isValidId(notificationId) && isValidNotification(incoming())
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+              'readAt', 'updatedAt'
+            ]))
+          );
+        allow delete: if isSignedIn() && isValidId(schoolId) && isValidId(notificationId) && (isAdmin() || existing().ownerUid == request.auth.uid);
       }
     }
   }

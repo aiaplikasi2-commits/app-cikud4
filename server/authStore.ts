@@ -1057,6 +1057,84 @@ export function createAuthStore(storageDir: string) {
     return toPublicUser(updated);
   }
 
+  function updateOwnProfile(
+    userId: string,
+    input: {
+      fullName?: string;
+      nip?: string;
+      email?: string;
+    }
+  ): { user: AuthUser; changedFields: string[] } {
+    const users = readUsers();
+    const index = users.findIndex((u) => u.id === userId);
+    if (index === -1) {
+      throw new AuthError(404, 'Akun pengguna tidak ditemukan.');
+    }
+
+    const existing = users[index];
+    if (existing.status !== 'ACTIVE') {
+      throw new AuthError(403, 'Akun Anda sedang dinonaktifkan.');
+    }
+
+    const fullName =
+      input.fullName !== undefined
+        ? String(input.fullName ?? '').trim()
+        : existing.fullName;
+    const nip =
+      input.nip !== undefined ? String(input.nip ?? '').trim() : existing.nip;
+    const emailRaw =
+      input.email !== undefined
+        ? String(input.email ?? '').trim()
+        : existing.email;
+
+    if (!fullName) {
+      throw new AuthError(400, 'Nama lengkap wajib diisi.');
+    }
+
+    const emailError = validateEmailFormat(emailRaw);
+    if (emailError) {
+      throw new AuthError(400, emailError);
+    }
+
+    if (
+      nip &&
+      users.some((u) => u.id !== userId && u.nip.trim() && u.nip.trim() === nip)
+    ) {
+      throw new AuthError(409, 'NIP sudah terdaftar pada akun lain.');
+    }
+
+    if (
+      emailRaw &&
+      users.some(
+        (u) =>
+          u.id !== userId &&
+          u.email &&
+          normalizeEmail(u.email) === normalizeEmail(emailRaw)
+      )
+    ) {
+      throw new AuthError(409, 'Email sudah terdaftar pada akun lain.');
+    }
+
+    const changedFields: string[] = [];
+    if (fullName !== existing.fullName) changedFields.push('Nama Lengkap');
+    if (nip !== existing.nip) changedFields.push('NIP');
+    if (emailRaw !== existing.email) changedFields.push('Email');
+
+    const updated: StoredUserRecord = {
+      ...existing,
+      fullName,
+      nip,
+      email: emailRaw,
+      updatedAt: new Date().toISOString(),
+    };
+    users[index] = updated;
+    writeUsers(users);
+    return {
+      user: toPublicUser(updated),
+      changedFields,
+    };
+  }
+
   function hasAnyOperator(): boolean {
     return !needsInitialOperatorSetup();
   }
@@ -1282,6 +1360,7 @@ export function createAuthStore(storageDir: string) {
     restoreRawUsers,
     getUserById,
     setAssignedClass,
+    updateOwnProfile,
     setupInitialOperator,
     login,
     revokeSessionToken,

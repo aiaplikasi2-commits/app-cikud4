@@ -43,6 +43,10 @@ import {
   normalizeClassKey,
 } from './server/classAssignment.ts';
 import { AgendaStoreError, createAgendaStore } from './server/agendaStore.ts';
+import {
+  createNotificationStore,
+  NotificationStoreError,
+} from './server/notificationStore.ts';
 import type {
   AttendanceContextInfo,
   AttendanceKetColumnMode,
@@ -323,6 +327,7 @@ async function startServer() {
   const letterStore = createLetterStore(STORAGE_DIR);
   const attendanceStore = createAttendanceStore(STORAGE_DIR);
   const agendaStore = createAgendaStore(STORAGE_DIR);
+  const notificationStore = createNotificationStore(STORAGE_DIR);
   const classAssignment = createClassAssignmentService({
     authStore,
     teacherStore,
@@ -523,6 +528,145 @@ async function startServer() {
   app.get('/api/auth/me', requireAuth, (req: AuthedRequest, res) => {
     res.json({ user: req.authUser });
   });
+
+  function findLinkedTeacherForUser(user: AuthUser) {
+    const allTeachers = teacherStore.getAllRaw();
+    if (user.teacherRecordId) {
+      const byRef = allTeachers.find((t) => t.id === user.teacherRecordId);
+      if (byRef) return byRef;
+    }
+    const byLinked = allTeachers.find((t) => t.linkedAccountId === user.id);
+    if (byLinked) return byLinked;
+    const nip = user.nip.trim();
+    if (nip) {
+      const byNip = allTeachers.find((t) => t.nip.trim() === nip);
+      if (byNip) return byNip;
+    }
+    return null;
+  }
+
+  // Get detailed own profile (account + masked linked TeacherRecord)
+  app.get('/api/auth/me/profile', requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const linked = findLinkedTeacherForUser(req.authUser!);
+      const teacherProfile = linked
+        ? teacherStore.getTeacherById(
+            linked.id,
+            req.authUser!.role,
+            authStore.listTeacherAccounts()
+          )
+        : null;
+      res.json({
+        user: req.authUser,
+        teacherProfile,
+      });
+    } catch {
+      res.status(500).json({ error: 'Gagal memuat data profil pengguna.' });
+    }
+  });
+
+  // Update own profile (Guru & Operator) and notify Admin on Guru profile updates
+  app.put(
+    '/api/auth/me/profile',
+    requireAuth,
+    express.json({ limit: '1mb' }),
+    (req: AuthedRequest, res) => {
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const linked = findLinkedTeacherForUser(req.authUser!);
+
+        const { user: updatedAccount, changedFields: accountChanged } =
+          authStore.updateOwnProfile(req.authUser!.id, {
+            fullName:
+              body.fullName !== undefined ? String(body.fullName ?? '') : undefined,
+            nip: body.nip !== undefined ? String(body.nip ?? '') : undefined,
+            email: body.email !== undefined ? String(body.email ?? '') : undefined,
+          });
+
+        let teacherProfile = null;
+        let teacherChanged: string[] = [];
+        if (linked) {
+          const teacherInput =
+            body.teacherProfile && typeof body.teacherProfile === 'object'
+              ? (body.teacherProfile as Record<string, unknown>)
+              : {};
+          try {
+            const teacherRes = teacherStore.updateTeacherSelfProfile(linked.id, {
+              ...teacherInput,
+              nama: updatedAccount.fullName,
+              nip: updatedAccount.nip,
+              email: updatedAccount.email,
+            });
+            teacherProfile = teacherRes.teacher;
+            teacherChanged = teacherRes.changedFields;
+          } catch (teacherErr) {
+            // Rollback account update if teacher record validation fails (e.g. duplicate NIP)
+            try {
+              authStore.updateOwnProfile(req.authUser!.id, {
+                fullName: req.authUser!.fullName,
+                nip: req.authUser!.nip,
+                email: req.authUser!.email,
+              });
+            } catch {
+              // Ignore rollback failure
+            }
+            throw teacherErr;
+          }
+        }
+
+        const enrichedUser = classAssignment.enrichAuthUser(updatedAccount);
+
+        // Keep homeroom teacher metadata synchronized when Guru updates name/NIP
+        if (enrichedUser.role === 'GURU' && enrichedUser.assignedClass) {
+          const currentHm = attendanceStore.getSheet(
+            new Date().toISOString().slice(0, 10),
+            enrichedUser.assignedClass
+          ).homeroom;
+          if (
+            currentHm &&
+            (currentHm.teacherId === enrichedUser.id ||
+              (linked && currentHm.teacherId === linked.id) ||
+              !currentHm.teacherId)
+          ) {
+            attendanceStore.saveHomeroom({
+              rombel: enrichedUser.assignedClass,
+              teacherId: linked?.id ?? enrichedUser.teacherRecordId ?? enrichedUser.id,
+              teacherName: enrichedUser.fullName,
+              teacherNip: enrichedUser.nip,
+            });
+          }
+        }
+
+        const allChanged = Array.from(new Set([...accountChanged, ...teacherChanged]));
+        if (enrichedUser.role === 'GURU' && allChanged.length > 0) {
+          const actorName = enrichedUser.fullName || enrichedUser.username;
+          notificationStore.createNotification({
+            type: 'TEACHER_PROFILE_UPDATED',
+            actorUserId: enrichedUser.id,
+            actorName,
+            actorUsername: enrichedUser.username,
+            title: `Pembaruan Profil Guru: ${actorName}`,
+            summary: `${actorName} memperbarui data profil pribadinya (${allChanged.join(', ')}).`,
+            targetId: linked?.id ?? enrichedUser.id,
+            targetName: actorName,
+            changedFields: allChanged,
+          });
+        }
+
+        res.json({
+          user: enrichedUser,
+          teacherProfile,
+          changedFields: allChanged,
+        });
+      } catch (err) {
+        if (err instanceof AuthError || err instanceof TeacherStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal memperbarui profil pengguna.' });
+      }
+    }
+  );
 
   // Available classes & occupation status (OPERATOR & GURU)
   app.get('/api/classes', requireAuth, (req: AuthedRequest, res) => {
@@ -1208,14 +1352,63 @@ async function startServer() {
     }
   );
 
-  // Update student (OPERATOR ONLY)
+  // Update student (OPERATOR edits any; GURU strictly isolated to assignedClass & triggers Admin notification)
   app.put(
     '/api/students/:id',
     requireAuth,
-    requireRole('OPERATOR'),
     express.json({ limit: '1mb' }),
-    (req, res) => {
+    (req: AuthedRequest, res) => {
       try {
+        if (req.authUser!.role === 'GURU') {
+          const assigned = classAssignment.getEffectiveAssignedClassForAccount(
+            req.authUser!
+          );
+          if (!assigned) {
+            res.status(403).json({
+              error: 'Anda belum memilih kelas yang dipegang di menu Profil.',
+            });
+            return;
+          }
+          const existing = studentStore.getStudentById(req.params.id, 'OPERATOR');
+          if (
+            normalizeClassKey(existing.rombelSaatIni) !==
+            normalizeClassKey(assigned)
+          ) {
+            res.status(403).json({
+              error: `Akses ditolak. Siswa ini berada di kelas ${existing.rombelSaatIni || '-'}, sedangkan Anda hanya memegang kelas ${assigned}.`,
+            });
+            return;
+          }
+
+          const { student, changedFields } = studentStore.updateStudentWithAudit(
+            req.params.id,
+            req.body || {},
+            {
+              actorRole: 'GURU',
+              lockedRombel: existing.rombelSaatIni,
+            }
+          );
+
+          if (changedFields.length > 0) {
+            const actorName =
+              req.authUser!.fullName || req.authUser!.username || 'Guru';
+            notificationStore.createNotification({
+              type: 'STUDENT_UPDATED',
+              actorUserId: req.authUser!.id,
+              actorName,
+              actorUsername: req.authUser!.username,
+              title: `Perubahan Data Siswa: ${student.nama}`,
+              summary: `${actorName} memperbarui data siswa ${student.nama} (${student.rombelSaatIni || assigned}): ${changedFields.join(', ')}.`,
+              targetId: student.id,
+              targetName: student.nama,
+              changedFields,
+            });
+          }
+
+          res.json({ student, changedFields });
+          return;
+        }
+
         const student = studentStore.updateStudent(req.params.id, req.body || {});
         res.json({ student });
       } catch (err) {
@@ -2661,6 +2854,30 @@ async function startServer() {
           req.authUser!,
           teachers
         );
+        if (req.authUser!.role === 'GURU') {
+          const actorName =
+            req.authUser!.fullName || req.authUser!.username || 'Guru';
+          const timeInfo = agenda.startTime
+            ? ` pukul ${agenda.startTime}${agenda.endTime ? `–${agenda.endTime}` : ''}`
+            : '';
+          const locInfo = agenda.location ? ` di ${agenda.location}` : '';
+          notificationStore.createNotification({
+            type: 'AGENDA_CREATED',
+            actorUserId: req.authUser!.id,
+            actorName,
+            actorUsername: req.authUser!.username,
+            title: `Agenda Baru: ${agenda.title}`,
+            summary: `${actorName} menambahkan agenda "${agenda.title}" (${agenda.category}) untuk tanggal ${agenda.date}${timeInfo}${locInfo}.`,
+            targetId: agenda.id,
+            targetName: agenda.title,
+            changedFields: [
+              agenda.category,
+              agenda.visibility === 'PERSONAL' ? 'Agenda Pribadi' : 'Agenda Sekolah',
+              agenda.location ? `Lokasi: ${agenda.location}` : '',
+            ].filter(Boolean),
+            eventDate: agenda.date,
+          });
+        }
         res.status(201).json({ agenda });
       } catch (err) {
         if (err instanceof AgendaStoreError) {
@@ -2729,6 +2946,100 @@ async function startServer() {
   });
 
   // =========================================================================
+  // ADMIN NOTIFICATION CENTER ROUTES (OPERATOR ONLY)
+  // =========================================================================
+
+  app.get('/api/notifications', requireAuth, requireRole('OPERATOR'), (_req, res) => {
+    try {
+      res.json(notificationStore.listNotifications());
+    } catch {
+      res.status(500).json({ error: 'Gagal memuat daftar notifikasi Admin.' });
+    }
+  });
+
+  app.get(
+    '/api/notifications/unread-count',
+    requireAuth,
+    requireRole('OPERATOR'),
+    (_req, res) => {
+      try {
+        res.json({ unreadCount: notificationStore.getUnreadCount() });
+      } catch {
+        res.status(500).json({ error: 'Gagal menghitung notifikasi baru.' });
+      }
+    }
+  );
+
+  app.patch(
+    '/api/notifications/:id/read',
+    requireAuth,
+    requireRole('OPERATOR'),
+    (req, res) => {
+      try {
+        const notification = notificationStore.markAsRead(req.params.id);
+        res.json({ notification, unreadCount: notificationStore.getUnreadCount() });
+      } catch (err) {
+        if (err instanceof NotificationStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal menandai notifikasi sudah dibaca.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/notifications/read-all',
+    requireAuth,
+    requireRole('OPERATOR'),
+    (_req, res) => {
+      try {
+        const result = notificationStore.markAllAsRead();
+        res.json({ ...result, unreadCount: 0 });
+      } catch {
+        res.status(500).json({ error: 'Gagal menandai semua notifikasi.' });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/notifications/:id',
+    requireAuth,
+    requireRole('OPERATOR'),
+    (req, res) => {
+      try {
+        notificationStore.deleteNotification(req.params.id);
+        res.json({ ok: true, unreadCount: notificationStore.getUnreadCount() });
+      } catch (err) {
+        if (err instanceof NotificationStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal menghapus notifikasi.' });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/notifications',
+    requireAuth,
+    requireRole('OPERATOR'),
+    (req, res) => {
+      try {
+        const mode = req.query.mode === 'read' ? 'read' : 'all';
+        const result = notificationStore.clearNotifications(mode);
+        res.json({
+          ok: true,
+          ...result,
+          unreadCount: notificationStore.getUnreadCount(),
+        });
+      } catch {
+        res.status(500).json({ error: 'Gagal membersihkan notifikasi.' });
+      }
+    }
+  );
+
+  // =========================================================================
   // CLOUD FIRESTORE SYNC SNAPSHOT & NON-DESTRUCTIVE RESTORE ROUTES
   // =========================================================================
 
@@ -2780,6 +3091,7 @@ async function startServer() {
         letters: letterStore.getAllRaw(),
         attendance: attendanceStore.getAllRaw(),
         agendas: agendaStore.getAllRaw(),
+        notifications: notificationStore.getAllRaw(),
       });
     } catch {
       res.status(500).json({ error: 'Gagal menyiapkan snapshot data sekolah.' });
@@ -2829,6 +3141,7 @@ async function startServer() {
           config?: Record<string, any>;
           items?: unknown[];
         };
+        notifications?: unknown;
       };
 
       const restoredFiles: Partial<Record<SchoolFileSlot, StoredFileMeta>> = {};
@@ -2984,6 +3297,9 @@ async function startServer() {
         body.attendance || {}
       );
       const agendasResult = agendaStore.restoreRawAgendas(body.agendas || {});
+      const notificationsResult = notificationStore.restoreRawNotifications(
+        body.notifications
+      );
 
       res.json({
         ok: true,
@@ -2994,6 +3310,7 @@ async function startServer() {
         letters: lettersResult,
         attendance: attendanceResult,
         agendas: agendasResult,
+        notifications: notificationsResult,
       });
     } catch {
       res.status(500).json({ error: 'Gagal memulihkan data sekolah dari database online.' });

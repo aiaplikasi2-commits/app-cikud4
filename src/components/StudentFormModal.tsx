@@ -5,10 +5,12 @@ import type {
   StudentInputPayload,
   StudentRecord,
 } from '../types/student';
+import type { UserRole } from '../types/auth';
 import { createStudent, updateStudent } from '../lib/studentApi';
 
 interface StudentFormModalProps {
   existingStudent?: StudentRecord | null;
+  userRole?: UserRole;
   onClose: () => void;
   onSaved: (student: StudentRecord) => void;
 }
@@ -112,7 +114,18 @@ const Field: React.FC<{
   placeholder?: string;
   type?: string;
   required?: boolean;
-}> = ({ label, value, onChange, placeholder, type = 'text', required }) => (
+  readOnly?: boolean;
+  helperText?: string;
+}> = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  required,
+  readOnly = false,
+  helperText,
+}) => (
   <div>
     <label className="block text-xs font-semibold text-slate-700 mb-1">
       {label} {required && <span className="text-rose-500">*</span>}
@@ -120,20 +133,32 @@ const Field: React.FC<{
     <input
       type={type}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => {
+        if (!readOnly) onChange(e.target.value);
+      }}
       placeholder={placeholder}
       required={required}
-      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+      readOnly={readOnly}
+      className={`w-full rounded-xl border px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none ${
+        readOnly
+          ? 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed'
+          : 'border-slate-300 bg-white text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20'
+      }`}
     />
+    {helperText && (
+      <p className="mt-1 text-[11px] text-slate-500">{helperText}</p>
+    )}
   </div>
 );
 
 export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   existingStudent,
+  userRole = 'OPERATOR',
   onClose,
   onSaved,
 }) => {
   const isEdit = Boolean(existingStudent);
+  const isGuru = userRole === 'GURU';
   const [activeSection, setActiveSection] = useState<FormSectionId>('identitas');
   const [form, setForm] = useState<StudentInputPayload>(() =>
     buildInitialPayload(existingStudent)
@@ -304,16 +329,42 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   value={/^\d{4}-\d{2}-\d{2}$/.test(form.tanggalLahir) ? form.tanggalLahir : ''}
                   onChange={(v) => setField('tanggalLahir', v)}
                 />
-                <Field label="NIK" value={form.nik} onChange={(v) => setField('nik', v)} />
+                <Field
+                  label="NIK"
+                  value={form.nik}
+                  onChange={(v) => setField('nik', v)}
+                  readOnly={isGuru && Boolean(existingStudent?.nik?.includes('•'))}
+                  helperText={
+                    isGuru && existingStudent?.nik?.includes('•')
+                      ? 'Data sensitif terlindungi'
+                      : undefined
+                  }
+                />
                 <Field
                   label="No. KK"
                   value={form.noKk}
                   onChange={(v) => setField('noKk', v)}
+                  readOnly={isGuru && Boolean(existingStudent?.noKk?.includes('•'))}
+                  helperText={
+                    isGuru && existingStudent?.noKk?.includes('•')
+                      ? 'Data sensitif terlindungi'
+                      : undefined
+                  }
                 />
                 <Field
                   label="No. Registrasi Akta Lahir"
                   value={form.noRegistrasiAktaLahir}
                   onChange={(v) => setField('noRegistrasiAktaLahir', v)}
+                  readOnly={
+                    isGuru &&
+                    Boolean(existingStudent?.noRegistrasiAktaLahir?.includes('•'))
+                  }
+                  helperText={
+                    isGuru &&
+                    existingStudent?.noRegistrasiAktaLahir?.includes('•')
+                      ? 'Data sensitif terlindungi'
+                      : undefined
+                  }
                 />
                 <Field
                   label="Kebutuhan Khusus"
@@ -443,6 +494,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                     label="NIK"
                     value={form[activeSection].nik}
                     onChange={(v) => setParentField(activeSection, 'nik', v)}
+                    readOnly={
+                      isGuru &&
+                      Boolean(existingStudent?.[activeSection]?.nik?.includes('•'))
+                    }
+                    helperText={
+                      isGuru &&
+                      existingStudent?.[activeSection]?.nik?.includes('•')
+                        ? 'Data sensitif terlindungi'
+                        : undefined
+                    }
                   />
                 </div>
               </div>
@@ -455,6 +516,12 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   value={form.rombelSaatIni}
                   onChange={(v) => setField('rombelSaatIni', v)}
                   placeholder="Contoh: Kelas 6A"
+                  readOnly={isGuru}
+                  helperText={
+                    isGuru
+                      ? 'Kelas dikunci sesuai rombel tanggung jawab Anda.'
+                      : undefined
+                  }
                 />
                 <Field
                   label="Sekolah Asal"
@@ -525,6 +592,16 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   label="Nomor Rekening Bank"
                   value={form.nomorRekeningBank}
                   onChange={(v) => setField('nomorRekeningBank', v)}
+                  readOnly={
+                    isGuru &&
+                    Boolean(existingStudent?.nomorRekeningBank?.includes('•'))
+                  }
+                  helperText={
+                    isGuru &&
+                    existingStudent?.nomorRekeningBank?.includes('•')
+                      ? 'Data sensitif terlindungi'
+                      : undefined
+                  }
                 />
                 <Field
                   label="Rekening Atas Nama"

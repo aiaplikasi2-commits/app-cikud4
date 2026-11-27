@@ -145,6 +145,121 @@ function maskStudentForTeacher(record: StudentRecord): StudentRecord {
   };
 }
 
+function hasMaskBullet(val: string): boolean {
+  return val.includes('•');
+}
+
+function preserveMaskedStudentFields(
+  existing: StudentRecord,
+  payload: StudentInputPayload
+): StudentInputPayload {
+  return {
+    ...payload,
+    nik: hasMaskBullet(payload.nik) ? existing.nik : payload.nik,
+    noKk: hasMaskBullet(payload.noKk) ? existing.noKk : payload.noKk,
+    noRegistrasiAktaLahir: hasMaskBullet(payload.noRegistrasiAktaLahir)
+      ? existing.noRegistrasiAktaLahir
+      : payload.noRegistrasiAktaLahir,
+    nomorRekeningBank: hasMaskBullet(payload.nomorRekeningBank)
+      ? existing.nomorRekeningBank
+      : payload.nomorRekeningBank,
+    ayah: {
+      ...payload.ayah,
+      nik: hasMaskBullet(payload.ayah.nik) ? existing.ayah.nik : payload.ayah.nik,
+    },
+    ibu: {
+      ...payload.ibu,
+      nik: hasMaskBullet(payload.ibu.nik) ? existing.ibu.nik : payload.ibu.nik,
+    },
+    wali: {
+      ...payload.wali,
+      nik: hasMaskBullet(payload.wali.nik) ? existing.wali.nik : payload.wali.nik,
+    },
+  };
+}
+
+function diffParentInfo(
+  a: StudentInputPayload['ayah'],
+  b: StudentInputPayload['ayah']
+): boolean {
+  return (
+    cleanStr(a?.nama) !== cleanStr(b?.nama) ||
+    cleanStr(a?.tahunLahir) !== cleanStr(b?.tahunLahir) ||
+    cleanStr(a?.jenjangPendidikan) !== cleanStr(b?.jenjangPendidikan) ||
+    cleanStr(a?.pekerjaan) !== cleanStr(b?.pekerjaan) ||
+    cleanStr(a?.penghasilan) !== cleanStr(b?.penghasilan) ||
+    cleanStr(a?.nik) !== cleanStr(b?.nik)
+  );
+}
+
+function diffStudentFields(
+  existing: StudentRecord,
+  next: StudentInputPayload
+): string[] {
+  const changed: string[] = [];
+  const check = (label: string, prevVal: string, nextVal: string) => {
+    if (cleanStr(prevVal) !== cleanStr(nextVal)) {
+      changed.push(label);
+    }
+  };
+
+  check('No. Urut', existing.no, next.no);
+  check('Nama Siswa', existing.nama, next.nama);
+  check('NIPD', existing.nipd, next.nipd);
+  check('Jenis Kelamin', existing.jk, next.jk);
+  check('NISN', existing.nisn, next.nisn);
+  check('Tempat Lahir', existing.tempatLahir, next.tempatLahir);
+  check('Tanggal Lahir', existing.tanggalLahir, next.tanggalLahir);
+  check('NIK', existing.nik, next.nik);
+  check('Agama', existing.agama, next.agama);
+  check('No. Akta Lahir', existing.noRegistrasiAktaLahir, next.noRegistrasiAktaLahir);
+  check('No. KK', existing.noKk, next.noKk);
+  check('Kebutuhan Khusus', existing.kebutuhanKhusus, next.kebutuhanKhusus);
+  check('Anak ke-berapa', existing.anakKeBerapa, next.anakKeBerapa);
+  check('Jml Saudara Kandung', existing.jmlSaudaraKandung, next.jmlSaudaraKandung);
+  check('Alamat', existing.alamat, next.alamat);
+  check('RT', existing.rt, next.rt);
+  check('RW', existing.rw, next.rw);
+  check('Dusun', existing.dusun, next.dusun);
+  check('Kelurahan', existing.kelurahan, next.kelurahan);
+  check('Kecamatan', existing.kecamatan, next.kecamatan);
+  check('Kode Pos', existing.kodePos, next.kodePos);
+  check('Jenis Tinggal', existing.jenisTinggal, next.jenisTinggal);
+  check('Transportasi', existing.alatTransportasi, next.alatTransportasi);
+  check('Telepon', existing.telepon, next.telepon);
+  check('No. HP', existing.hp, next.hp);
+  check('Email', existing.email, next.email);
+  check('Lintang', existing.lintang, next.lintang);
+  check('Bujur', existing.bujur, next.bujur);
+  check('Jarak ke Sekolah', existing.jarakRumahKeSekolahKm, next.jarakRumahKeSekolahKm);
+
+  if (diffParentInfo(existing.ayah, next.ayah)) changed.push('Data Ayah');
+  if (diffParentInfo(existing.ibu, next.ibu)) changed.push('Data Ibu');
+  if (diffParentInfo(existing.wali, next.wali)) changed.push('Data Wali');
+
+  check('Rombel', existing.rombelSaatIni, next.rombelSaatIni);
+  check('Sekolah Asal', existing.sekolahAsal, next.sekolahAsal);
+  check('SKHUN', existing.skhun, next.skhun);
+  check('No. Peserta UN', existing.noPesertaUjianNasional, next.noPesertaUjianNasional);
+  check('No. Seri Ijazah', existing.noSeriIjazah, next.noSeriIjazah);
+  check('Penerima KPS', existing.penerimaKps, next.penerimaKps);
+  check('No. KPS', existing.noKps, next.noKps);
+  check('Penerima KIP', existing.penerimaKip, next.penerimaKip);
+  check('Nomor KIP', existing.nomorKip, next.nomorKip);
+  check('Nama di KIP', existing.namaDiKip, next.namaDiKip);
+  check('Nomor KKS', existing.nomorKks, next.nomorKks);
+  check('Bank', existing.bank, next.bank);
+  check('No. Rekening', existing.nomorRekeningBank, next.nomorRekeningBank);
+  check('Rekening Atas Nama', existing.rekeningAtasNama, next.rekeningAtasNama);
+  check('Layak PIP', existing.layakPip, next.layakPip);
+  check('Alasan Layak PIP', existing.alasanLayakPip, next.alasanLayakPip);
+  check('Berat Badan', existing.beratBadan, next.beratBadan);
+  check('Tinggi Badan', existing.tinggiBadan, next.tinggiBadan);
+  check('Lingkar Kepala', existing.lingkarKepala, next.lingkarKepala);
+
+  return changed;
+}
+
 function toListItem(record: StudentRecord): StudentListItem {
   return {
     id: record.id,
@@ -298,20 +413,35 @@ export function createStudentStore(storageDir: string) {
     return record;
   }
 
-  function updateStudent(
+  function updateStudentWithAudit(
     id: string,
-    input: Partial<StudentInputPayload>
-  ): StudentRecord {
+    input: Partial<StudentInputPayload>,
+    options?: {
+      actorRole?: UserRole;
+      lockedRombel?: string;
+    }
+  ): {
+    student: StudentRecord;
+    changedFields: string[];
+  } {
     const all = readAll();
     const index = all.findIndex((s) => s.id === id);
     if (index === -1) {
       throw new StudentStoreError(404, 'Data siswa tidak ditemukan.');
     }
 
-    const payload = sanitizeStudentPayload(input);
+    const existing = all[index];
+    const sanitized = sanitizeStudentPayload(input);
+    let payload = preserveMaskedStudentFields(existing, sanitized);
+    if (options?.lockedRombel !== undefined) {
+      payload = {
+        ...payload,
+        rombelSaatIni: options.lockedRombel,
+      };
+    }
     validateUniqueIdentifiers(all, payload, id);
 
-    const existing = all[index];
+    const changedFields = diffStudentFields(existing, payload);
     const updated: StudentRecord = {
       ...existing,
       ...payload,
@@ -323,7 +453,20 @@ export function createStudentStore(storageDir: string) {
 
     all[index] = updated;
     writeAllAtomic(all);
-    return updated;
+    return {
+      student:
+        options?.actorRole === 'GURU'
+          ? maskStudentForTeacher(updated)
+          : updated,
+      changedFields,
+    };
+  }
+
+  function updateStudent(
+    id: string,
+    input: Partial<StudentInputPayload>
+  ): StudentRecord {
+    return updateStudentWithAudit(id, input).student;
   }
 
   function deleteStudent(id: string): void {
@@ -596,6 +739,7 @@ export function createStudentStore(storageDir: string) {
     getStudentById,
     createStudent,
     updateStudent,
+    updateStudentWithAudit,
     deleteStudent,
     commitDapodikImport,
   };

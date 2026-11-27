@@ -29,6 +29,11 @@ import {
   type AgendaStoreSnapshot,
   type AgendaVisibility,
 } from '../types/agenda';
+import type {
+  AdminNotificationRecord,
+  AdminNotificationStoreSnapshot,
+  AdminNotificationType,
+} from '../types/notification';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { resolveApiUrl } from './authApi';
 
@@ -41,6 +46,7 @@ const TEACHERS_COL_PATH = `schools/${SCHOOL_ID}/teachers`;
 const LETTERS_COL_PATH = `schools/${SCHOOL_ID}/letters`;
 const ATTENDANCE_COL_PATH = `schools/${SCHOOL_ID}/attendance`;
 const AGENDAS_COL_PATH = `schools/${SCHOOL_ID}/agendas`;
+const NOTIFICATIONS_COL_PATH = `schools/${SCHOOL_ID}/notifications`;
 const HOMEROOM_DOC_ID = 'homeroom_assignments';
 const AGENDA_CONFIG_DOC_ID = 'agenda_config';
 
@@ -62,6 +68,7 @@ export interface ServerSyncSnapshot {
   letters: LetterRecord[];
   attendance?: AttendanceStorePayload;
   agendas?: AgendaStoreSnapshot;
+  notifications?: AdminNotificationStoreSnapshot;
 }
 
 export interface CloudSyncSummary {
@@ -73,6 +80,7 @@ export interface CloudSyncSummary {
     letters: number;
     attendance: number;
     agendas: number;
+    notifications: number;
     assets: number;
     settingsUpdated: boolean;
   };
@@ -83,6 +91,7 @@ export interface CloudSyncSummary {
     letters: number;
     attendance: number;
     agendas: number;
+    notifications: number;
     assets: number;
   };
 }
@@ -970,6 +979,62 @@ function fromCloudAgendaItem(data: DocumentData): AgendaRecord {
   };
 }
 
+function sanitizeNotificationType(val: unknown): AdminNotificationType {
+  const s = String(val ?? '').trim().toUpperCase();
+  if (s === 'TEACHER_PROFILE_UPDATED') return 'TEACHER_PROFILE_UPDATED';
+  if (s === 'AGENDA_CREATED') return 'AGENDA_CREATED';
+  return 'STUDENT_UPDATED';
+}
+
+function buildNotificationPayload(
+  n: AdminNotificationRecord,
+  ownerUid: string,
+  existingCreatedAt: unknown
+) {
+  return {
+    ownerUid,
+    id: cut(n.id, 128),
+    type: sanitizeNotificationType(n.type),
+    actorUserId: cut(n.actorUserId, 128),
+    actorName: cut(n.actorName, 150) || 'Guru',
+    actorUsername: cut(n.actorUsername, 60),
+    title: cut(n.title, 200) || 'Pemberitahuan Aktivitas Guru',
+    summary: cut(n.summary, 600),
+    targetId: cut(n.targetId, 128),
+    targetName: cut(n.targetName, 200),
+    changedFields: (n.changedFields || [])
+      .map((f) => cut(f, 160))
+      .filter(Boolean)
+      .slice(0, 40),
+    eventDate: cut(n.eventDate, 40),
+    readAt: cut(n.readAt, 64),
+    clientCreatedAt: cut(n.createdAt, 64),
+    createdAt: existingCreatedAt || serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function fromCloudNotificationDoc(data: DocumentData): AdminNotificationRecord {
+  const rawReadAt = String(data.readAt ?? '').trim();
+  return {
+    id: String(data.id ?? ''),
+    type: sanitizeNotificationType(data.type),
+    actorUserId: String(data.actorUserId ?? ''),
+    actorName: String(data.actorName ?? ''),
+    actorUsername: String(data.actorUsername ?? ''),
+    title: String(data.title ?? ''),
+    summary: String(data.summary ?? ''),
+    targetId: String(data.targetId ?? ''),
+    targetName: String(data.targetName ?? ''),
+    changedFields: Array.isArray(data.changedFields)
+      ? data.changedFields.map((f) => String(f ?? '').trim()).filter(Boolean)
+      : [],
+    eventDate: String(data.eventDate ?? ''),
+    createdAt: String(data.clientCreatedAt ?? ''),
+    readAt: rawReadAt || null,
+  };
+}
+
 export async function ensureSchoolDocExists(
   settings?: SchoolSettings
 ): Promise<{ ownerUid: string }> {
@@ -1039,6 +1104,7 @@ export async function syncSnapshotToCloud(
   letters: number;
   attendance: number;
   agendas: number;
+  notifications: number;
   assets: number;
 }> {
   const uid = getAuthenticatedCloudUid();
@@ -1050,6 +1116,7 @@ export async function syncSnapshotToCloud(
       letters: 0,
       attendance: 0,
       agendas: 0,
+      notifications: 0,
       assets: 0,
     };
   }
@@ -1064,6 +1131,7 @@ export async function syncSnapshotToCloud(
     existingLetters,
     existingAttendance,
     existingAgendas,
+    existingNotifications,
   ] = await Promise.all([
     fetchExistingMap(ASSETS_COL_PATH, ['schools', SCHOOL_ID, 'assets']),
     fetchExistingMap(ACCOUNTS_COL_PATH, ['schools', SCHOOL_ID, 'accounts']),
@@ -1072,6 +1140,7 @@ export async function syncSnapshotToCloud(
     fetchExistingMap(LETTERS_COL_PATH, ['schools', SCHOOL_ID, 'letters']),
     fetchExistingMap(ATTENDANCE_COL_PATH, ['schools', SCHOOL_ID, 'attendance']),
     fetchExistingMap(AGENDAS_COL_PATH, ['schools', SCHOOL_ID, 'agendas']),
+    fetchExistingMap(NOTIFICATIONS_COL_PATH, ['schools', SCHOOL_ID, 'notifications']),
   ]);
 
   const ops: Array<{
@@ -1085,7 +1154,8 @@ export async function syncSnapshotToCloud(
       | 'teacher'
       | 'letter'
       | 'attendance'
-      | 'agenda';
+      | 'agenda'
+      | 'notification';
   }> = [];
 
   for (const asset of snapshot.assets || []) {
@@ -1250,6 +1320,36 @@ export async function syncSnapshotToCloud(
     });
   }
 
+  const deletedNotifSet = new Set(snapshot.notifications?.deletedIds || []);
+  for (const notif of snapshot.notifications?.items || []) {
+    if (!notif?.id || deletedNotifSet.has(notif.id)) continue;
+    const prev = existingNotifications.get(notif.id);
+    if (
+      prev &&
+      prev.clientCreatedAt === notif.createdAt &&
+      String(prev.readAt ?? '') === String(notif.readAt ?? '')
+    ) {
+      continue;
+    }
+    const effectiveOwner = prev?.ownerUid ? String(prev.ownerUid) : ownerUid;
+    ops.push({
+      path: `${NOTIFICATIONS_COL_PATH}/${notif.id}`,
+      ref: doc(db, 'schools', SCHOOL_ID, 'notifications', notif.id),
+      data: buildNotificationPayload(notif, effectiveOwner, prev?.createdAt),
+      kind: 'notification',
+    });
+  }
+
+  const deleteNotificationRefs: Array<{ path: string; ref: ReturnType<typeof doc> }> = [];
+  for (const deletedId of deletedNotifSet) {
+    if (existingNotifications.has(deletedId)) {
+      deleteNotificationRefs.push({
+        path: `${NOTIFICATIONS_COL_PATH}/${deletedId}`,
+        ref: doc(db, 'schools', SCHOOL_ID, 'notifications', deletedId),
+      });
+    }
+  }
+
   const counts = {
     accounts: 0,
     students: 0,
@@ -1257,6 +1357,7 @@ export async function syncSnapshotToCloud(
     letters: 0,
     attendance: 0,
     agendas: 0,
+    notifications: 0,
     assets: 0,
   };
   const CHUNK_SIZE = 200;
@@ -1272,11 +1373,29 @@ export async function syncSnapshotToCloud(
       if (op.kind === 'letter') counts.letters++;
       if (op.kind === 'attendance') counts.attendance++;
       if (op.kind === 'agenda') counts.agendas++;
+      if (op.kind === 'notification') counts.notifications++;
     }
     try {
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, chunk[0]?.path ?? SCHOOL_DOC_PATH);
+    }
+  }
+
+  for (let i = 0; i < deleteNotificationRefs.length; i += CHUNK_SIZE) {
+    const chunk = deleteNotificationRefs.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const del of chunk) {
+      batch.delete(del.ref);
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        chunk[0]?.path ?? NOTIFICATIONS_COL_PATH
+      );
     }
   }
 
@@ -1293,6 +1412,7 @@ export async function fetchCloudSnapshot(): Promise<{
   letters: LetterRecord[];
   attendance: AttendanceStorePayload;
   agendas: AgendaStoreSnapshot;
+  notifications: AdminNotificationStoreSnapshot;
 }> {
   const emptyAgendaSnapshot: AgendaStoreSnapshot = {
     config: {
@@ -1315,6 +1435,7 @@ export async function fetchCloudSnapshot(): Promise<{
       letters: [],
       attendance: { homerooms: {}, sheets: [] },
       agendas: emptyAgendaSnapshot,
+      notifications: { items: [], deletedIds: [] },
     };
   }
 
@@ -1336,6 +1457,7 @@ export async function fetchCloudSnapshot(): Promise<{
       letters: [],
       attendance: { homerooms: {}, sheets: [] },
       agendas: emptyAgendaSnapshot,
+      notifications: { items: [], deletedIds: [] },
     };
   }
 
@@ -1347,6 +1469,7 @@ export async function fetchCloudSnapshot(): Promise<{
     lettersMap,
     attendanceMap,
     agendasMap,
+    notificationsMap,
   ] = await Promise.all([
     fetchExistingMap(ASSETS_COL_PATH, ['schools', SCHOOL_ID, 'assets']),
     fetchExistingMap(ACCOUNTS_COL_PATH, ['schools', SCHOOL_ID, 'accounts']),
@@ -1355,6 +1478,7 @@ export async function fetchCloudSnapshot(): Promise<{
     fetchExistingMap(LETTERS_COL_PATH, ['schools', SCHOOL_ID, 'letters']),
     fetchExistingMap(ATTENDANCE_COL_PATH, ['schools', SCHOOL_ID, 'attendance']),
     fetchExistingMap(AGENDAS_COL_PATH, ['schools', SCHOOL_ID, 'agendas']),
+    fetchExistingMap(NOTIFICATIONS_COL_PATH, ['schools', SCHOOL_ID, 'notifications']),
   ]);
 
   const sd = schoolSnap.data();
@@ -1435,6 +1559,14 @@ export async function fetchCloudSnapshot(): Promise<{
     }
   });
 
+  const notifications: AdminNotificationRecord[] = [];
+  notificationsMap.forEach((val) => {
+    const parsed = fromCloudNotificationDoc(val);
+    if (parsed.id && parsed.title) {
+      notifications.push(parsed);
+    }
+  });
+
   const settings: SchoolSettings = {
     identity: {
       schoolName: String(sd.schoolName ?? ''),
@@ -1471,7 +1603,8 @@ export async function fetchCloudSnapshot(): Promise<{
     Object.keys(homerooms).length > 0 ||
     sheets.length > 0 ||
     hasAgendaConfig ||
-    agendaItems.length > 0;
+    agendaItems.length > 0 ||
+    notifications.length > 0;
 
   return {
     hasData,
@@ -1483,6 +1616,7 @@ export async function fetchCloudSnapshot(): Promise<{
     letters,
     attendance: { homerooms, sheets },
     agendas: { config: agendaConfig, items: agendaItems },
+    notifications: { items: notifications, deletedIds: [] },
   };
 }
 
@@ -1519,6 +1653,7 @@ async function executeFullCloudSync(
       letters: 0,
       attendance: 0,
       agendas: 0,
+      notifications: 0,
       assets: cloud.assets.length,
       settingsUpdated: false,
     },
@@ -1529,6 +1664,7 @@ async function executeFullCloudSync(
       letters: 0,
       attendance: 0,
       agendas: 0,
+      notifications: 0,
       assets: 0,
     },
   };
@@ -1550,6 +1686,7 @@ async function executeFullCloudSync(
         letters: cloud.letters,
         attendance: cloud.attendance,
         agendas: cloud.agendas,
+        notifications: cloud.notifications,
       }),
     });
 
@@ -1567,6 +1704,10 @@ async function executeFullCloudSync(
         };
         agendas?: {
           configUpdated?: boolean;
+          restored?: number;
+          updated?: number;
+        };
+        notifications?: {
           restored?: number;
           updated?: number;
         };
@@ -1594,6 +1735,9 @@ async function executeFullCloudSync(
         (restoreData.agendas?.restored || 0) +
         (restoreData.agendas?.updated || 0) +
         (restoreData.agendas?.configUpdated ? 1 : 0);
+      summary.restoredFromCloud.notifications =
+        (restoreData.notifications?.restored || 0) +
+        (restoreData.notifications?.updated || 0);
     }
   }
 
@@ -1705,5 +1849,45 @@ export async function deleteAgendaFromCloud(agendaId: string): Promise<void> {
     await deleteDoc(doc(db, 'schools', SCHOOL_ID, 'agendas', agendaId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteNotificationFromCloud(
+  notificationId: string
+): Promise<void> {
+  const uid = getAuthenticatedCloudUid();
+  if (!uid || !notificationId) return;
+  const path = `${NOTIFICATIONS_COL_PATH}/${notificationId}`;
+  try {
+    await deleteDoc(
+      doc(db, 'schools', SCHOOL_ID, 'notifications', notificationId)
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteNotificationsFromCloud(
+  notificationIds: string[]
+): Promise<void> {
+  const uid = getAuthenticatedCloudUid();
+  if (!uid || notificationIds.length === 0) return;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < notificationIds.length; i += CHUNK_SIZE) {
+    const chunk = notificationIds.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const id of chunk) {
+      if (!id) continue;
+      batch.delete(doc(db, 'schools', SCHOOL_ID, 'notifications', id));
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        NOTIFICATIONS_COL_PATH
+      );
+    }
   }
 }

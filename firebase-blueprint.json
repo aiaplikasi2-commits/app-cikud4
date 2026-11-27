@@ -341,6 +341,51 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "AdminNotification": {
+      "title": "AdminNotification",
+      "description": "Notifikasi aktivitas guru untuk pusat pemberitahuan Admin (perubahan siswa, profil guru, dan agenda baru)",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": {
+          "type": "string",
+          "enum": ["STUDENT_UPDATED", "TEACHER_PROFILE_UPDATED", "AGENDA_CREATED"],
+          "maxLength": 40
+        },
+        "actorUserId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 150 },
+        "actorUsername": { "type": "string", "maxLength": 60 },
+        "title": { "type": "string", "maxLength": 200 },
+        "summary": { "type": "string", "maxLength": 600 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetName": { "type": "string", "maxLength": 200 },
+        "changedFields": { "type": "array", "items": { "type": "string" } },
+        "eventDate": { "type": "string", "maxLength": 40 },
+        "readAt": { "type": "string", "maxLength": 64 },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "type",
+        "actorUserId",
+        "actorName",
+        "actorUsername",
+        "title",
+        "summary",
+        "targetId",
+        "targetName",
+        "changedFields",
+        "eventDate",
+        "readAt",
+        "clientCreatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -375,6 +420,10 @@
     "/schools/{schoolId}/agendas/{agendaId}": {
       "schema": { "$ref": "#/entities/Agenda" },
       "description": "Koleksi agenda harian kegiatan sekolah dan pengaturan agenda"
+    },
+    "/schools/{schoolId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AdminNotification" },
+      "description": "Koleksi notifikasi aktivitas guru untuk pusat pemberitahuan Admin"
     }
   }
 }

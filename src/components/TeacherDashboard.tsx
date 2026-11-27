@@ -4,14 +4,12 @@ import type { AuthUser, PublicSchoolInfo } from '../types/auth';
 import { SchoolHeader } from './SchoolHeader';
 import { GURU_MENU_ITEMS, MenuGrid, MenuItem } from './MenuGrid';
 import { AdminAvatarIcon } from './MenuIcons';
-import { AgendaDashboardWidget } from './AgendaDashboardWidget';
 
 interface TeacherDashboardProps {
   user: AuthUser;
   school: PublicSchoolInfo;
   selectedMenuId: string | null;
   onSelectMenu: (menu: MenuItem) => void;
-  onOpenAgenda?: (openCreate?: boolean) => void;
   onOpenProfil?: () => void;
   onLogout: () => void;
   loggingOut?: boolean;
@@ -22,7 +20,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   school,
   selectedMenuId,
   onSelectMenu,
-  onOpenAgenda,
   onOpenProfil,
   onLogout,
   loggingOut = false,
@@ -50,18 +47,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <AdminAvatarIcon className="w-11 h-11 shrink-0" />
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <h2 className="text-sm sm:text-base font-extrabold text-[#17325C] truncate">
                   {user.fullName}
                 </h2>
-                <span className="inline-flex items-center rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                <span aria-hidden="true" className="text-slate-300 text-xs">
+                  ·
+                </span>
+                <span className="text-xs font-bold text-emerald-700 whitespace-nowrap">
                   Guru
                 </span>
+                <span aria-hidden="true" className="text-slate-300 text-xs">
+                  ·
+                </span>
                 <span
-                  className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-bold ${
-                    assignedClass
-                      ? 'bg-sky-50 border-sky-200 text-[#1D63D8]'
-                      : 'bg-amber-50 border-amber-200 text-amber-800'
+                  className={`text-xs font-bold whitespace-nowrap ${
+                    assignedClass ? 'text-[#1D63D8]' : 'text-amber-700'
                   }`}
                 >
                   {assignedClass
@@ -87,7 +88,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             type="button"
             onClick={onLogout}
             disabled={loggingOut}
-            className="self-start sm:self-center inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-[#FF5B4D] to-[#DC3026] hover:brightness-105 disabled:opacity-60 px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(220,48,38,0.28)] active:scale-95 transition-all cursor-pointer shrink-0 whitespace-nowrap"
+            className="self-start sm:self-center inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-[#FF5B4D] to-[#DC3026] hover:brightness-105 disabled:opacity-60 px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(220,48,38,0.28)] active:scale-95 transition-all cursor-pointer shrink-0 whitespace-nowrap min-h-[40px]"
           >
             <LogOut className="w-3.5 h-3.5" />
             {loggingOut ? 'Keluar...' : 'Logout'}
@@ -107,7 +108,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <button
                 type="button"
                 onClick={onOpenProfil}
-                className="rounded-lg border border-amber-300 bg-white hover:bg-amber-100 px-3 py-1 font-bold text-amber-900 cursor-pointer whitespace-nowrap"
+                className="rounded-lg border border-amber-300 bg-white hover:bg-amber-100 px-3 py-1.5 font-bold text-amber-900 cursor-pointer whitespace-nowrap min-h-[36px]"
               >
                 Pilih Kelas
               </button>
@@ -122,11 +123,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         selectedMenuId={selectedMenuId}
         onSelectMenu={onSelectMenu}
       />
-
-      {/* Ringkasan Agenda Harian */}
-      {onOpenAgenda && (
-        <AgendaDashboardWidget userRole="GURU" onOpenAgenda={onOpenAgenda} />
-      )}
     </div>
   );
 };

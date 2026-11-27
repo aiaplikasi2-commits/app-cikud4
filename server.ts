@@ -42,6 +42,7 @@ import {
   createClassAssignmentService,
   normalizeClassKey,
 } from './server/classAssignment.ts';
+import { AgendaStoreError, createAgendaStore } from './server/agendaStore.ts';
 import type {
   AttendanceContextInfo,
   AttendanceKetColumnMode,
@@ -227,7 +228,7 @@ function setSessionCookie(req: Request, res: Response, token: string): void {
     isSecure ? 'SameSite=None' : 'SameSite=Lax',
   ];
   if (isSecure) {
-    parts.push('Secure');
+    parts.push('Secure', 'Partitioned');
   }
   res.setHeader('Set-Cookie', parts.join('; '));
 }
@@ -242,9 +243,62 @@ function clearSessionCookie(req: Request, res: Response): void {
     isSecure ? 'SameSite=None' : 'SameSite=Lax',
   ];
   if (isSecure) {
-    parts.push('Secure');
+    parts.push('Secure', 'Partitioned');
   }
   res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function buildAllowedOriginSet(): Set<string> {
+  const rawValues = [
+    process.env.ALLOWED_ORIGINS,
+    process.env.CORS_ORIGINS,
+    process.env.APP_URL,
+    process.env.NETLIFY_URL,
+    process.env.URL,
+    process.env.DEPLOY_PRIME_URL,
+  ];
+  const allowed = new Set<string>();
+  for (const raw of rawValues) {
+    if (!raw) continue;
+    for (const part of raw.split(',')) {
+      const cleaned = part.trim().replace(/\/+$/, '');
+      if (!cleaned) continue;
+      try {
+        const parsed = new URL(cleaned);
+        allowed.add(parsed.origin);
+      } catch {
+        // Ignore invalid origin entries
+      }
+    }
+  }
+  return allowed;
+}
+
+function isOriginAllowed(req: Request, origin: string, allowlist: Set<string>): boolean {
+  const normalized = origin.trim().replace(/\/+$/, '');
+  if (allowlist.has(normalized)) {
+    return true;
+  }
+  try {
+    const parsedOrigin = new URL(normalized);
+    const reqHost = (req.headers['x-forwarded-host'] || req.get('host') || '')
+      .toString()
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    if (reqHost && parsedOrigin.host.toLowerCase() === reqHost) {
+      return true;
+    }
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      (parsedOrigin.hostname === 'localhost' || parsedOrigin.hostname === '127.0.0.1')
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 interface AuthedRequest extends Request {
@@ -259,6 +313,7 @@ async function startServer() {
   const teacherStore = createTeacherStore(STORAGE_DIR);
   const letterStore = createLetterStore(STORAGE_DIR);
   const attendanceStore = createAttendanceStore(STORAGE_DIR);
+  const agendaStore = createAgendaStore(STORAGE_DIR);
   const classAssignment = createClassAssignmentService({
     authStore,
     teacherStore,
@@ -299,6 +354,39 @@ async function startServer() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
+
+  const allowedOrigins = buildAllowedOriginSet();
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && origin.trim()) {
+      if (isOriginAllowed(req, origin, allowedOrigins)) {
+        res.setHeader('Access-Control-Allow-Origin', origin.trim().replace(/\/+$/, ''));
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader(
+          'Access-Control-Allow-Methods',
+          'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        );
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          'Content-Type, Authorization, X-Filename'
+        );
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        res.setHeader('Vary', 'Origin');
+      } else if (req.method === 'OPTIONS') {
+        res.status(403).json({
+          error:
+            'Origin tidak diizinkan oleh kebijakan CORS backend. Tambahkan domain Netlify Anda ke environment variable ALLOWED_ORIGINS di server backend.',
+        });
+        return;
+      }
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
 
   function extractToken(req: Request): string | null {
     const authHeader = req.headers.authorization;
@@ -2518,6 +2606,120 @@ async function startServer() {
   );
 
   // =========================================================================
+  // AGENDA HARIAN ROUTES (OPERATOR & GURU / TENDIK INTEGRATED)
+  // =========================================================================
+
+  app.get('/api/agenda', requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const teachers = teacherStore.getAllRaw();
+      const result = agendaStore.listAgendasForUser(req.authUser!, teachers, {
+        date: typeof req.query.date === 'string' ? req.query.date : '',
+        month: typeof req.query.month === 'string' ? req.query.month : '',
+        category:
+          typeof req.query.category === 'string' ? req.query.category : '',
+        status: typeof req.query.status === 'string' ? req.query.status : '',
+        pic: typeof req.query.pic === 'string' ? req.query.pic : '',
+        search: typeof req.query.search === 'string' ? req.query.search : '',
+      });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof AgendaStoreError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: 'Gagal memuat data Agenda Harian.' });
+    }
+  });
+
+  app.get('/api/agenda/summary', requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const result = agendaStore.getSummaryForUser(req.authUser!);
+      res.json(result);
+    } catch {
+      res.status(500).json({ error: 'Gagal memuat ringkasan Agenda Harian.' });
+    }
+  });
+
+  app.post(
+    '/api/agenda',
+    requireAuth,
+    express.json({ limit: '1mb' }),
+    (req: AuthedRequest, res) => {
+      try {
+        const teachers = teacherStore.getAllRaw();
+        const agenda = agendaStore.createAgenda(
+          req.body || {},
+          req.authUser!,
+          teachers
+        );
+        res.status(201).json({ agenda });
+      } catch (err) {
+        if (err instanceof AgendaStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal menyimpan agenda kegiatan.' });
+      }
+    }
+  );
+
+  app.put(
+    '/api/agenda/config',
+    requireAuth,
+    requireRole('OPERATOR'),
+    express.json({ limit: '1mb' }),
+    (req, res) => {
+      try {
+        const config = agendaStore.updateConfig(req.body || {});
+        res.json({ config });
+      } catch (err) {
+        if (err instanceof AgendaStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal memperbarui pengaturan Agenda Harian.' });
+      }
+    }
+  );
+
+  app.put(
+    '/api/agenda/:id',
+    requireAuth,
+    express.json({ limit: '1mb' }),
+    (req: AuthedRequest, res) => {
+      try {
+        const teachers = teacherStore.getAllRaw();
+        const agenda = agendaStore.updateAgenda(
+          req.params.id,
+          req.body || {},
+          req.authUser!,
+          teachers
+        );
+        res.json({ agenda });
+      } catch (err) {
+        if (err instanceof AgendaStoreError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: 'Gagal memperbarui agenda kegiatan.' });
+      }
+    }
+  );
+
+  app.delete('/api/agenda/:id', requireAuth, (req: AuthedRequest, res) => {
+    try {
+      agendaStore.deleteAgenda(req.params.id, req.authUser!);
+      res.json({ ok: true });
+    } catch (err) {
+      if (err instanceof AgendaStoreError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: 'Gagal menghapus agenda kegiatan.' });
+    }
+  });
+
+  // =========================================================================
   // CLOUD FIRESTORE SYNC SNAPSHOT & NON-DESTRUCTIVE RESTORE ROUTES
   // =========================================================================
 
@@ -2568,6 +2770,7 @@ async function startServer() {
         teachers: teacherStore.getAllRaw(),
         letters: letterStore.getAllRaw(),
         attendance: attendanceStore.getAllRaw(),
+        agendas: agendaStore.getAllRaw(),
       });
     } catch {
       res.status(500).json({ error: 'Gagal menyiapkan snapshot data sekolah.' });
@@ -2612,6 +2815,10 @@ async function startServer() {
         attendance?: {
           homerooms?: Record<string, any>;
           sheets?: unknown[];
+        };
+        agendas?: {
+          config?: Record<string, any>;
+          items?: unknown[];
         };
       };
 
@@ -2767,6 +2974,7 @@ async function startServer() {
       const attendanceResult = attendanceStore.restoreRawAttendance(
         body.attendance || {}
       );
+      const agendasResult = agendaStore.restoreRawAgendas(body.agendas || {});
 
       res.json({
         ok: true,
@@ -2776,6 +2984,7 @@ async function startServer() {
         teachers: teachersResult,
         letters: lettersResult,
         attendance: attendanceResult,
+        agendas: agendasResult,
       });
     } catch {
       res.status(500).json({ error: 'Gagal memulihkan data sekolah dari database online.' });

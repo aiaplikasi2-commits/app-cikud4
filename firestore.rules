@@ -226,13 +226,13 @@ service cloud.firestore {
         ])
         && isValidId(data.ownerUid)
         && isValidId(data.id)
-        && data.type in ['SUKET_SISWA_DITERIMA', 'SUKET_PINDAH_SEKOLAH']
+        && data.type in ['SUKET_SISWA_DITERIMA', 'SUKET_PINDAH_SEKOLAH', 'SURAT_LAIN_LAIN']
         && isValidStr(data.title, 150) && data.title.size() >= 1
         && isValidStr(data.letterNumber, 100) && data.letterNumber.size() >= 1
         && isValidStr(data.letterDate, 40)
         && isValidStr(data.studentId, 128)
         && isValidStr(data.recipientName, 200) && data.recipientName.size() >= 1
-        && data.data is map && data.data.size() <= 30
+        && data.data is map && data.data.size() <= 45
         && data.data.keys().hasOnly([
           'letterNumber', 'letterDate', 'letterCity', 'schoolLocationLine',
           'studentId', 'studentName', 'birthPlace', 'birthDate',
@@ -240,7 +240,11 @@ service cloud.firestore {
           'requirementClause', 'closingClause',
           'nipdNisn', 'parentName', 'parentJob', 'destinationSchool',
           'transferReason', 'paperSize',
-          'showKop', 'showSignatureAssets'
+          'showKop', 'showSignatureAssets',
+          'customTitle', 'customSubject', 'customAttachment',
+          'customRecipient', 'customBody', 'customCc',
+          'customUseSettingsSigner', 'customSignerPosition',
+          'customSignerName', 'customSignerNip'
         ])
         && isValidStr(data.clientCreatedAt, 64)
         && isValidStr(data.clientUpdatedAt, 64)
@@ -269,6 +273,59 @@ service cloud.firestore {
         && isValidStr(data.waliKelasNip, 40)
         && isValidStr(data.updatedBy, 150)
         && data.entries is map && data.entries.size() <= 150
+        && isValidStr(data.clientCreatedAt, 64)
+        && isValidStr(data.clientUpdatedAt, 64)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAgenda(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'id', 'kind', 'title', 'date', 'startTime', 'endTime',
+          'category', 'picId', 'picName', 'participantIds', 'participantNames',
+          'extraParticipants', 'location', 'description', 'notes', 'status',
+          'visibility', 'createdByUserId', 'createdByName', 'createdByRole',
+          'updatedByName', 'categories', 'allowGuruCreate',
+          'allowOperatorViewGuruPersonal', 'clientCreatedAt', 'clientUpdatedAt',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'id', 'kind', 'title', 'date', 'startTime', 'endTime',
+          'category', 'picId', 'picName', 'participantIds', 'participantNames',
+          'extraParticipants', 'location', 'description', 'notes', 'status',
+          'visibility', 'createdByUserId', 'createdByName', 'createdByRole',
+          'updatedByName', 'categories', 'allowGuruCreate',
+          'allowOperatorViewGuruPersonal', 'clientCreatedAt', 'clientUpdatedAt',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerUid)
+        && isValidId(data.id)
+        && data.kind in ['AGENDA_ITEM', 'AGENDA_CONFIG']
+        && isValidStr(data.title, 200)
+        && isValidStr(data.date, 20)
+        && isValidStr(data.startTime, 10)
+        && isValidStr(data.endTime, 10)
+        && isValidStr(data.category, 80)
+        && isValidStr(data.picId, 128)
+        && isValidStr(data.picName, 150)
+        && data.participantIds is list && data.participantIds.size() <= 100
+        && (data.participantIds.size() == 0 || data.participantIds[0] is string)
+        && data.participantNames is list && data.participantNames.size() <= 100
+        && (data.participantNames.size() == 0 || data.participantNames[0] is string)
+        && isValidStr(data.extraParticipants, 300)
+        && isValidStr(data.location, 180)
+        && isValidStr(data.description, 1500)
+        && isValidStr(data.notes, 800)
+        && data.status in ['DIRENCANAKAN', 'BERLANGSUNG', 'SELESAI', 'DIBATALKAN']
+        && data.visibility in ['SCHOOL', 'PERSONAL']
+        && isValidStr(data.createdByUserId, 128)
+        && isValidStr(data.createdByName, 150)
+        && data.createdByRole in ['OPERATOR', 'GURU']
+        && isValidStr(data.updatedByName, 150)
+        && data.categories is list && data.categories.size() <= 50
+        && (data.categories.size() == 0 || data.categories[0] is string)
+        && data.allowGuruCreate is bool
+        && data.allowOperatorViewGuruPersonal is bool
         && isValidStr(data.clientCreatedAt, 64)
         && isValidStr(data.clientUpdatedAt, 64)
         && data.createdAt is timestamp
@@ -440,6 +497,34 @@ service cloud.firestore {
             ]))
           );
         allow delete: if isSignedIn() && isValidId(schoolId) && isValidId(attendanceId) && (isAdmin() || existing().ownerUid == request.auth.uid);
+      }
+
+      match /agendas/{agendaId} {
+        allow get: if isSignedIn() && isValidId(schoolId) && isValidId(agendaId) && (isAdmin() || existing().ownerUid == request.auth.uid);
+        allow list: if isSignedIn() && (isAdmin() || existing().ownerUid == request.auth.uid);
+        allow create: if isSignedIn() && isValidId(schoolId) && isValidId(agendaId) && isValidAgenda(incoming())
+          && schoolExists(schoolId) && isSchoolOwner(schoolId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().id == agendaId
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isSignedIn() && isValidId(schoolId) && isValidId(agendaId) && isValidAgenda(incoming())
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+              'kind', 'title', 'date', 'startTime', 'endTime', 'category',
+              'picId', 'picName', 'participantIds', 'participantNames',
+              'extraParticipants', 'location', 'description', 'notes', 'status',
+              'visibility', 'createdByUserId', 'createdByName', 'createdByRole',
+              'updatedByName', 'categories', 'allowGuruCreate',
+              'allowOperatorViewGuruPersonal', 'clientUpdatedAt', 'updatedAt'
+            ]))
+          );
+        allow delete: if isSignedIn() && isValidId(schoolId) && isValidId(agendaId) && (isAdmin() || existing().ownerUid == request.auth.uid);
       }
     }
   }

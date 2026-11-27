@@ -10,7 +10,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import type { AuthUser, PublicSchoolInfo } from '../types/auth';
-import { changeOwnPassword } from '../lib/authApi';
+import { changeOwnPassword, resolveAssetUrl } from '../lib/authApi';
 
 interface ForcePasswordChangeScreenProps {
   user: AuthUser;
@@ -33,7 +33,8 @@ export const ForcePasswordChangeScreen: React.FC<
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const effectiveLogoSrc = school.logoUrl || '/assets/aistudio/logo_1128ead8.png';
+  const effectiveLogoSrc =
+    resolveAssetUrl(school.logoUrl) || '/assets/aistudio/logo_1128ead8.png';
   const schoolTitle = school.schoolName?.trim() || 'Sistem Administrasi Sekolah';
 
   const handleSubmit = async (e: React.FormEvent) => {

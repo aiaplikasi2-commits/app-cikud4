@@ -21,7 +21,16 @@ import type {
   AttendanceStudentEntry,
   ClassHomeroomAssignment,
 } from '../types/attendance';
+import {
+  DEFAULT_AGENDA_CATEGORIES,
+  type AgendaConfig,
+  type AgendaRecord,
+  type AgendaStatus,
+  type AgendaStoreSnapshot,
+  type AgendaVisibility,
+} from '../types/agenda';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { resolveApiUrl } from './authApi';
 
 const SCHOOL_ID = 'main';
 const SCHOOL_DOC_PATH = `schools/${SCHOOL_ID}`;
@@ -31,7 +40,9 @@ const STUDENTS_COL_PATH = `schools/${SCHOOL_ID}/students`;
 const TEACHERS_COL_PATH = `schools/${SCHOOL_ID}/teachers`;
 const LETTERS_COL_PATH = `schools/${SCHOOL_ID}/letters`;
 const ATTENDANCE_COL_PATH = `schools/${SCHOOL_ID}/attendance`;
+const AGENDAS_COL_PATH = `schools/${SCHOOL_ID}/agendas`;
 const HOMEROOM_DOC_ID = 'homeroom_assignments';
+const AGENDA_CONFIG_DOC_ID = 'agenda_config';
 
 export interface CloudAssetPayload {
   slot: SchoolFileSlot;
@@ -50,6 +61,7 @@ export interface ServerSyncSnapshot {
   teachers: TeacherRecord[];
   letters: LetterRecord[];
   attendance?: AttendanceStorePayload;
+  agendas?: AgendaStoreSnapshot;
 }
 
 export interface CloudSyncSummary {
@@ -60,6 +72,7 @@ export interface CloudSyncSummary {
     teachers: number;
     letters: number;
     attendance: number;
+    agendas: number;
     assets: number;
     settingsUpdated: boolean;
   };
@@ -69,6 +82,7 @@ export interface CloudSyncSummary {
     teachers: number;
     letters: number;
     attendance: number;
+    agendas: number;
     assets: number;
   };
 }
@@ -312,27 +326,58 @@ function buildLetterPayload(
   const letterType =
     l.type === 'SUKET_PINDAH_SEKOLAH'
       ? 'SUKET_PINDAH_SEKOLAH'
-      : 'SUKET_SISWA_DITERIMA';
+      : l.type === 'SURAT_LAIN_LAIN'
+        ? 'SURAT_LAIN_LAIN'
+        : 'SUKET_SISWA_DITERIMA';
+  const defaultTitle =
+    letterType === 'SUKET_PINDAH_SEKOLAH'
+      ? 'Surat Keterangan Pindah Sekolah'
+      : letterType === 'SURAT_LAIN_LAIN'
+        ? cut(d?.customTitle, 150) || 'Surat Lain-lain'
+        : 'Surat Mutasi Keluar';
+  const firstRecipientLine = String(d?.customRecipient ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  const resolvedRecipient =
+    letterType === 'SURAT_LAIN_LAIN'
+      ? cut(
+          l.recipientName ||
+            firstRecipientLine ||
+            d?.customSubject ||
+            d?.customTitle,
+          200
+        ) || 'Umum'
+      : cut(l.recipientName || d?.studentName, 200) || 'Siswa';
+  const paperSize =
+    d?.paperSize === 'LEGAL'
+      ? 'LEGAL'
+      : d?.paperSize === 'A4'
+        ? 'A4'
+        : 'F4';
+
   return {
     ownerUid,
     id: cut(l.id, 128),
     type: letterType,
-    title:
-      cut(l.title, 150) ||
-      (letterType === 'SUKET_PINDAH_SEKOLAH'
-        ? 'Surat Keterangan Pindah Sekolah'
-        : 'Surat Mutasi Keluar'),
+    title: cut(l.title, 150) || defaultTitle,
     letterNumber: cut(l.letterNumber || d?.letterNumber, 100) || '-',
     letterDate: cut(l.letterDate || d?.letterDate, 40),
-    studentId: cut(l.studentId, 128),
-    recipientName: cut(l.recipientName || d?.studentName, 200) || 'Siswa',
+    studentId: letterType === 'SURAT_LAIN_LAIN' ? '' : cut(l.studentId, 128),
+    recipientName: resolvedRecipient,
     data: {
       letterNumber: cut(d?.letterNumber || l.letterNumber, 100) || '-',
       letterDate: cut(d?.letterDate || l.letterDate, 40),
       letterCity: cut(d?.letterCity, 120),
       schoolLocationLine: cut(d?.schoolLocationLine, 250),
-      studentId: cut(d?.studentId ?? l.studentId, 128),
-      studentName: cut(d?.studentName || l.recipientName, 200) || 'Siswa',
+      studentId:
+        letterType === 'SURAT_LAIN_LAIN'
+          ? ''
+          : cut(d?.studentId ?? l.studentId, 128),
+      studentName:
+        letterType === 'SURAT_LAIN_LAIN'
+          ? cut(d?.studentName, 200)
+          : cut(d?.studentName || l.recipientName, 200) || 'Siswa',
       birthPlace: cut(d?.birthPlace, 120),
       birthDate: cut(d?.birthDate, 40),
       gender: cut(d?.gender, 40),
@@ -347,9 +392,19 @@ function buildLetterPayload(
       parentJob: cut(d?.parentJob, 100),
       destinationSchool: cut(d?.destinationSchool, 180),
       transferReason: cut(d?.transferReason, 250),
-      paperSize: d?.paperSize === 'LEGAL' ? 'LEGAL' : 'F4',
+      paperSize,
       showKop: Boolean(d?.showKop),
       showSignatureAssets: Boolean(d?.showSignatureAssets),
+      customTitle: cut(d?.customTitle, 150),
+      customSubject: cut(d?.customSubject, 250),
+      customAttachment: cut(d?.customAttachment, 150),
+      customRecipient: cut(d?.customRecipient, 600),
+      customBody: cut(d?.customBody, 20000),
+      customCc: cut(d?.customCc, 600),
+      customUseSettingsSigner: d?.customUseSettingsSigner !== false,
+      customSignerPosition: cut(d?.customSignerPosition, 150),
+      customSignerName: cut(d?.customSignerName, 150),
+      customSignerNip: cut(d?.customSignerNip, 60),
     },
     clientCreatedAt: cut(l.createdAt, 64),
     clientUpdatedAt: cut(l.updatedAt, 64),
@@ -454,6 +509,122 @@ function buildAttendanceSheetPayload(
     entries: cleanEntries,
     clientCreatedAt: cut(sheet.createdAt, 64),
     clientUpdatedAt: cut(sheet.updatedAt, 64),
+    createdAt: existingCreatedAt || serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function sanitizeAgendaStatus(val: unknown): AgendaStatus {
+  const s = String(val ?? '').trim().toUpperCase();
+  if (
+    s === 'DIRENCANAKAN' ||
+    s === 'BERLANGSUNG' ||
+    s === 'SELESAI' ||
+    s === 'DIBATALKAN'
+  ) {
+    return s;
+  }
+  return 'DIRENCANAKAN';
+}
+
+function sanitizeAgendaVisibility(val: unknown): AgendaVisibility {
+  return String(val ?? '').trim().toUpperCase() === 'PERSONAL'
+    ? 'PERSONAL'
+    : 'SCHOOL';
+}
+
+function computeAgendaConfigVersion(config: AgendaConfig): string {
+  return `${config.allowGuruCreate ? '1' : '0'}:${config.allowOperatorViewGuruPersonal ? '1' : '0'}:${config.updatedAt || ''}:${(config.categories || []).join('|')}`.slice(
+    0,
+    64
+  );
+}
+
+function buildAgendaConfigPayload(
+  config: AgendaConfig,
+  ownerUid: string,
+  existingCreatedAt: unknown
+) {
+  const cleanCategories = (config.categories || [])
+    .map((c) => cut(c, 80).trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  return {
+    ownerUid,
+    id: AGENDA_CONFIG_DOC_ID,
+    kind: 'AGENDA_CONFIG',
+    title: 'Konfigurasi Agenda Harian',
+    date: '',
+    startTime: '',
+    endTime: '',
+    category: '',
+    picId: '',
+    picName: '',
+    participantIds: [],
+    participantNames: [],
+    extraParticipants: '',
+    location: '',
+    description: '',
+    notes: '',
+    status: 'DIRENCANAKAN',
+    visibility: 'SCHOOL',
+    createdByUserId: '',
+    createdByName: 'Operator',
+    createdByRole: 'OPERATOR',
+    updatedByName: 'Operator',
+    categories:
+      cleanCategories.length > 0
+        ? cleanCategories
+        : [...DEFAULT_AGENDA_CATEGORIES],
+    allowGuruCreate: config.allowGuruCreate !== false,
+    allowOperatorViewGuruPersonal:
+      config.allowOperatorViewGuruPersonal !== false,
+    clientCreatedAt: 'agenda_config',
+    clientUpdatedAt: cut(config.updatedAt || computeAgendaConfigVersion(config), 64),
+    createdAt: existingCreatedAt || serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function buildAgendaItemPayload(
+  item: AgendaRecord,
+  ownerUid: string,
+  existingCreatedAt: unknown
+) {
+  return {
+    ownerUid,
+    id: cut(item.id, 128),
+    kind: 'AGENDA_ITEM',
+    title: cut(item.title, 200) || 'Kegiatan Sekolah',
+    date: cut(item.date, 20),
+    startTime: cut(item.startTime, 10),
+    endTime: cut(item.endTime, 10),
+    category: cut(item.category, 80) || 'Kegiatan lainnya',
+    picId: cut(item.picId, 128),
+    picName: cut(item.picName, 150),
+    participantIds: (item.participantIds || [])
+      .map((x) => cut(x, 128))
+      .filter(Boolean)
+      .slice(0, 100),
+    participantNames: (item.participantNames || [])
+      .map((x) => cut(x, 150))
+      .filter(Boolean)
+      .slice(0, 100),
+    extraParticipants: cut(item.extraParticipants, 300),
+    location: cut(item.location, 180),
+    description: cut(item.description, 1500),
+    notes: cut(item.notes, 800),
+    status: sanitizeAgendaStatus(item.status),
+    visibility: sanitizeAgendaVisibility(item.visibility),
+    createdByUserId: cut(item.createdByUserId, 128) || 'system',
+    createdByName: cut(item.createdByName, 150) || 'Pengguna',
+    createdByRole: item.createdByRole === 'GURU' ? 'GURU' : 'OPERATOR',
+    updatedByName: cut(item.updatedByName, 150) || 'Pengguna',
+    categories: [],
+    allowGuruCreate: true,
+    allowOperatorViewGuruPersonal: true,
+    clientCreatedAt: cut(item.createdAt, 64),
+    clientUpdatedAt: cut(item.updatedAt, 64),
     createdAt: existingCreatedAt || serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -626,7 +797,9 @@ function fromCloudLetterDoc(data: DocumentData): LetterRecord {
   const letterType =
     data.type === 'SUKET_PINDAH_SEKOLAH'
       ? 'SUKET_PINDAH_SEKOLAH'
-      : 'SUKET_SISWA_DITERIMA';
+      : data.type === 'SURAT_LAIN_LAIN'
+        ? 'SURAT_LAIN_LAIN'
+        : 'SUKET_SISWA_DITERIMA';
 
   return {
     id: String(data.id ?? ''),
@@ -635,19 +808,24 @@ function fromCloudLetterDoc(data: DocumentData): LetterRecord {
       data.title ??
         (letterType === 'SUKET_PINDAH_SEKOLAH'
           ? 'Surat Keterangan Pindah Sekolah'
-          : 'Surat Mutasi Keluar')
+          : letterType === 'SURAT_LAIN_LAIN'
+            ? String(payload.customTitle ?? '') || 'Surat Lain-lain'
+            : 'Surat Mutasi Keluar')
     ),
     letterNumber: String(data.letterNumber ?? payload.letterNumber ?? ''),
     letterDate: String(data.letterDate ?? payload.letterDate ?? ''),
-    studentId: rawStudentId,
+    studentId: letterType === 'SURAT_LAIN_LAIN' ? null : rawStudentId,
     recipientName: String(data.recipientName ?? payload.studentName ?? ''),
     data: {
       letterNumber: String(payload.letterNumber ?? data.letterNumber ?? ''),
       letterDate: String(payload.letterDate ?? data.letterDate ?? ''),
       letterCity: String(payload.letterCity ?? ''),
       schoolLocationLine: String(payload.schoolLocationLine ?? ''),
-      studentId: rawStudentId,
-      studentName: String(payload.studentName ?? data.recipientName ?? ''),
+      studentId: letterType === 'SURAT_LAIN_LAIN' ? null : rawStudentId,
+      studentName:
+        letterType === 'SURAT_LAIN_LAIN'
+          ? String(payload.studentName ?? '')
+          : String(payload.studentName ?? data.recipientName ?? ''),
       birthPlace: String(payload.birthPlace ?? ''),
       birthDate: String(payload.birthDate ?? ''),
       gender: String(payload.gender ?? ''),
@@ -663,9 +841,24 @@ function fromCloudLetterDoc(data: DocumentData): LetterRecord {
       destinationSchool: String(payload.destinationSchool ?? ''),
       transferReason:
         String(payload.transferReason ?? '') || 'permintaan orang tua / wali siswa',
-      paperSize: payload.paperSize === 'LEGAL' ? 'LEGAL' : 'F4',
+      paperSize:
+        payload.paperSize === 'LEGAL'
+          ? 'LEGAL'
+          : payload.paperSize === 'A4'
+            ? 'A4'
+            : 'F4',
       showKop: payload.showKop !== false,
       showSignatureAssets: payload.showSignatureAssets !== false,
+      customTitle: String(payload.customTitle ?? ''),
+      customSubject: String(payload.customSubject ?? ''),
+      customAttachment: String(payload.customAttachment ?? ''),
+      customRecipient: String(payload.customRecipient ?? ''),
+      customBody: String(payload.customBody ?? ''),
+      customCc: String(payload.customCc ?? ''),
+      customUseSettingsSigner: payload.customUseSettingsSigner !== false,
+      customSignerPosition: String(payload.customSignerPosition ?? ''),
+      customSignerName: String(payload.customSignerName ?? ''),
+      customSignerNip: String(payload.customSignerNip ?? ''),
     },
     createdAt: String(data.clientCreatedAt ?? ''),
     updatedAt: String(data.clientUpdatedAt ?? ''),
@@ -721,6 +914,57 @@ function fromCloudAttendanceSheet(data: DocumentData): AttendanceSheetRecord {
     waliKelasNip: String(data.waliKelasNip ?? ''),
     entries,
     updatedBy: String(data.updatedBy ?? ''),
+    createdAt: String(data.clientCreatedAt ?? ''),
+    updatedAt: String(data.clientUpdatedAt ?? ''),
+  };
+}
+
+function fromCloudAgendaConfig(data: DocumentData): AgendaConfig {
+  const rawCats = Array.isArray(data.categories)
+    ? data.categories.map((c) => String(c ?? '').trim()).filter(Boolean)
+    : [];
+  return {
+    categories:
+      rawCats.length > 0 ? rawCats : [...DEFAULT_AGENDA_CATEGORIES],
+    allowGuruCreate: data.allowGuruCreate !== false,
+    allowOperatorViewGuruPersonal:
+      data.allowOperatorViewGuruPersonal !== false,
+    updatedAt:
+      typeof data.clientUpdatedAt === 'string' && data.clientUpdatedAt.trim()
+        ? data.clientUpdatedAt.trim()
+        : null,
+  };
+}
+
+function fromCloudAgendaItem(data: DocumentData): AgendaRecord {
+  return {
+    id: String(data.id ?? ''),
+    title: String(data.title ?? ''),
+    date: String(data.date ?? ''),
+    startTime: String(data.startTime ?? ''),
+    endTime: String(data.endTime ?? ''),
+    category: String(data.category ?? 'Kegiatan lainnya'),
+    picId:
+      typeof data.picId === 'string' && data.picId.trim()
+        ? data.picId.trim()
+        : null,
+    picName: String(data.picName ?? ''),
+    participantIds: Array.isArray(data.participantIds)
+      ? data.participantIds.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : [],
+    participantNames: Array.isArray(data.participantNames)
+      ? data.participantNames.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : [],
+    extraParticipants: String(data.extraParticipants ?? ''),
+    location: String(data.location ?? ''),
+    description: String(data.description ?? ''),
+    notes: String(data.notes ?? ''),
+    status: sanitizeAgendaStatus(data.status),
+    visibility: sanitizeAgendaVisibility(data.visibility),
+    createdByUserId: String(data.createdByUserId ?? ''),
+    createdByName: String(data.createdByName ?? ''),
+    createdByRole: data.createdByRole === 'GURU' ? 'GURU' : 'OPERATOR',
+    updatedByName: String(data.updatedByName ?? ''),
     createdAt: String(data.clientCreatedAt ?? ''),
     updatedAt: String(data.clientUpdatedAt ?? ''),
   };
@@ -794,6 +1038,7 @@ export async function syncSnapshotToCloud(
   teachers: number;
   letters: number;
   attendance: number;
+  agendas: number;
   assets: number;
 }> {
   const uid = getAuthenticatedCloudUid();
@@ -804,6 +1049,7 @@ export async function syncSnapshotToCloud(
       teachers: 0,
       letters: 0,
       attendance: 0,
+      agendas: 0,
       assets: 0,
     };
   }
@@ -817,6 +1063,7 @@ export async function syncSnapshotToCloud(
     existingTeachers,
     existingLetters,
     existingAttendance,
+    existingAgendas,
   ] = await Promise.all([
     fetchExistingMap(ASSETS_COL_PATH, ['schools', SCHOOL_ID, 'assets']),
     fetchExistingMap(ACCOUNTS_COL_PATH, ['schools', SCHOOL_ID, 'accounts']),
@@ -824,13 +1071,21 @@ export async function syncSnapshotToCloud(
     fetchExistingMap(TEACHERS_COL_PATH, ['schools', SCHOOL_ID, 'teachers']),
     fetchExistingMap(LETTERS_COL_PATH, ['schools', SCHOOL_ID, 'letters']),
     fetchExistingMap(ATTENDANCE_COL_PATH, ['schools', SCHOOL_ID, 'attendance']),
+    fetchExistingMap(AGENDAS_COL_PATH, ['schools', SCHOOL_ID, 'agendas']),
   ]);
 
   const ops: Array<{
     path: string;
     ref: ReturnType<typeof doc>;
     data: Record<string, unknown>;
-    kind: 'asset' | 'account' | 'student' | 'teacher' | 'letter' | 'attendance';
+    kind:
+      | 'asset'
+      | 'account'
+      | 'student'
+      | 'teacher'
+      | 'letter'
+      | 'attendance'
+      | 'agenda';
   }> = [];
 
   for (const asset of snapshot.assets || []) {
@@ -958,12 +1213,50 @@ export async function syncSnapshotToCloud(
     });
   }
 
+  if (snapshot.agendas?.config) {
+    const prevCfg = existingAgendas.get(AGENDA_CONFIG_DOC_ID);
+    const nextVersion = cut(
+      snapshot.agendas.config.updatedAt ||
+        computeAgendaConfigVersion(snapshot.agendas.config),
+      64
+    );
+    if (!prevCfg || prevCfg.clientUpdatedAt !== nextVersion) {
+      const effectiveOwner = prevCfg?.ownerUid ? String(prevCfg.ownerUid) : ownerUid;
+      ops.push({
+        path: `${AGENDAS_COL_PATH}/${AGENDA_CONFIG_DOC_ID}`,
+        ref: doc(db, 'schools', SCHOOL_ID, 'agendas', AGENDA_CONFIG_DOC_ID),
+        data: buildAgendaConfigPayload(
+          snapshot.agendas.config,
+          effectiveOwner,
+          prevCfg?.createdAt
+        ),
+        kind: 'agenda',
+      });
+    }
+  }
+
+  for (const agenda of snapshot.agendas?.items || []) {
+    if (!agenda?.id) continue;
+    const prev = existingAgendas.get(agenda.id);
+    if (prev && prev.clientUpdatedAt === agenda.updatedAt) {
+      continue;
+    }
+    const effectiveOwner = prev?.ownerUid ? String(prev.ownerUid) : ownerUid;
+    ops.push({
+      path: `${AGENDAS_COL_PATH}/${agenda.id}`,
+      ref: doc(db, 'schools', SCHOOL_ID, 'agendas', agenda.id),
+      data: buildAgendaItemPayload(agenda, effectiveOwner, prev?.createdAt),
+      kind: 'agenda',
+    });
+  }
+
   const counts = {
     accounts: 0,
     students: 0,
     teachers: 0,
     letters: 0,
     attendance: 0,
+    agendas: 0,
     assets: 0,
   };
   const CHUNK_SIZE = 200;
@@ -978,6 +1271,7 @@ export async function syncSnapshotToCloud(
       if (op.kind === 'teacher') counts.teachers++;
       if (op.kind === 'letter') counts.letters++;
       if (op.kind === 'attendance') counts.attendance++;
+      if (op.kind === 'agenda') counts.agendas++;
     }
     try {
       await batch.commit();
@@ -998,7 +1292,18 @@ export async function fetchCloudSnapshot(): Promise<{
   teachers: TeacherRecord[];
   letters: LetterRecord[];
   attendance: AttendanceStorePayload;
+  agendas: AgendaStoreSnapshot;
 }> {
+  const emptyAgendaSnapshot: AgendaStoreSnapshot = {
+    config: {
+      categories: [...DEFAULT_AGENDA_CATEGORIES],
+      allowGuruCreate: true,
+      allowOperatorViewGuruPersonal: true,
+      updatedAt: null,
+    },
+    items: [],
+  };
+
   const uid = getAuthenticatedCloudUid();
   if (!uid) {
     return {
@@ -1009,6 +1314,7 @@ export async function fetchCloudSnapshot(): Promise<{
       teachers: [],
       letters: [],
       attendance: { homerooms: {}, sheets: [] },
+      agendas: emptyAgendaSnapshot,
     };
   }
 
@@ -1029,6 +1335,7 @@ export async function fetchCloudSnapshot(): Promise<{
       teachers: [],
       letters: [],
       attendance: { homerooms: {}, sheets: [] },
+      agendas: emptyAgendaSnapshot,
     };
   }
 
@@ -1039,6 +1346,7 @@ export async function fetchCloudSnapshot(): Promise<{
     teachersMap,
     lettersMap,
     attendanceMap,
+    agendasMap,
   ] = await Promise.all([
     fetchExistingMap(ASSETS_COL_PATH, ['schools', SCHOOL_ID, 'assets']),
     fetchExistingMap(ACCOUNTS_COL_PATH, ['schools', SCHOOL_ID, 'accounts']),
@@ -1046,6 +1354,7 @@ export async function fetchCloudSnapshot(): Promise<{
     fetchExistingMap(TEACHERS_COL_PATH, ['schools', SCHOOL_ID, 'teachers']),
     fetchExistingMap(LETTERS_COL_PATH, ['schools', SCHOOL_ID, 'letters']),
     fetchExistingMap(ATTENDANCE_COL_PATH, ['schools', SCHOOL_ID, 'attendance']),
+    fetchExistingMap(AGENDAS_COL_PATH, ['schools', SCHOOL_ID, 'agendas']),
   ]);
 
   const sd = schoolSnap.data();
@@ -1111,6 +1420,21 @@ export async function fetchCloudSnapshot(): Promise<{
     }
   });
 
+  let agendaConfig: AgendaConfig = emptyAgendaSnapshot.config;
+  let hasAgendaConfig = false;
+  const agendaItems: AgendaRecord[] = [];
+  agendasMap.forEach((val, docId) => {
+    if (val.kind === 'AGENDA_CONFIG' || docId === AGENDA_CONFIG_DOC_ID) {
+      agendaConfig = fromCloudAgendaConfig(val);
+      hasAgendaConfig = true;
+    } else if (val.kind === 'AGENDA_ITEM') {
+      const parsed = fromCloudAgendaItem(val);
+      if (parsed.id && parsed.title && parsed.date) {
+        agendaItems.push(parsed);
+      }
+    }
+  });
+
   const settings: SchoolSettings = {
     identity: {
       schoolName: String(sd.schoolName ?? ''),
@@ -1145,7 +1469,9 @@ export async function fetchCloudSnapshot(): Promise<{
     teachers.length > 0 ||
     letters.length > 0 ||
     Object.keys(homerooms).length > 0 ||
-    sheets.length > 0;
+    sheets.length > 0 ||
+    hasAgendaConfig ||
+    agendaItems.length > 0;
 
   return {
     hasData,
@@ -1156,6 +1482,7 @@ export async function fetchCloudSnapshot(): Promise<{
     teachers,
     letters,
     attendance: { homerooms, sheets },
+    agendas: { config: agendaConfig, items: agendaItems },
   };
 }
 
@@ -1165,7 +1492,7 @@ export async function syncServerSnapshotIfOperator(
   const uid = getAuthenticatedCloudUid();
   if (!uid) return false;
 
-  const res = await fetch('/api/sync/snapshot', {
+  const res = await fetch(resolveApiUrl('/api/sync/snapshot'), {
     cache: 'no-store',
     credentials: 'include',
     headers: authHeaders,
@@ -1191,6 +1518,7 @@ async function executeFullCloudSync(
       teachers: 0,
       letters: 0,
       attendance: 0,
+      agendas: 0,
       assets: cloud.assets.length,
       settingsUpdated: false,
     },
@@ -1200,12 +1528,13 @@ async function executeFullCloudSync(
       teachers: 0,
       letters: 0,
       attendance: 0,
+      agendas: 0,
       assets: 0,
     },
   };
 
   if (cloud.hasData) {
-    const restoreRes = await fetch('/api/sync/restore', {
+    const restoreRes = await fetch(resolveApiUrl('/api/sync/restore'), {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -1220,6 +1549,7 @@ async function executeFullCloudSync(
         teachers: cloud.teachers,
         letters: cloud.letters,
         attendance: cloud.attendance,
+        agendas: cloud.agendas,
       }),
     });
 
@@ -1234,6 +1564,11 @@ async function executeFullCloudSync(
           homerooms?: number;
           sheetsRestored?: number;
           sheetsUpdated?: number;
+        };
+        agendas?: {
+          configUpdated?: boolean;
+          restored?: number;
+          updated?: number;
         };
       };
       summary.restoredFromCloud.settingsUpdated = Boolean(
@@ -1255,11 +1590,15 @@ async function executeFullCloudSync(
         (restoreData.attendance?.homerooms || 0) +
         (restoreData.attendance?.sheetsRestored || 0) +
         (restoreData.attendance?.sheetsUpdated || 0);
+      summary.restoredFromCloud.agendas =
+        (restoreData.agendas?.restored || 0) +
+        (restoreData.agendas?.updated || 0) +
+        (restoreData.agendas?.configUpdated ? 1 : 0);
     }
   }
 
   if (isOperatorSession) {
-    const snapRes = await fetch('/api/sync/snapshot', {
+    const snapRes = await fetch(resolveApiUrl('/api/sync/snapshot'), {
       cache: 'no-store',
       credentials: 'include',
       headers: authHeaders,
@@ -1353,6 +1692,17 @@ export async function deleteAttendanceFromCloud(
   const path = `${ATTENDANCE_COL_PATH}/${attendanceId}`;
   try {
     await deleteDoc(doc(db, 'schools', SCHOOL_ID, 'attendance', attendanceId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteAgendaFromCloud(agendaId: string): Promise<void> {
+  const uid = getAuthenticatedCloudUid();
+  if (!uid || !agendaId) return;
+  const path = `${AGENDAS_COL_PATH}/${agendaId}`;
+  try {
+    await deleteDoc(doc(db, 'schools', SCHOOL_ID, 'agendas', agendaId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

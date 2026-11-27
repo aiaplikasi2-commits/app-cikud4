@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { ImagePlus, RefreshCw, Trash2, X, CheckCircle2, Clock } from 'lucide-react';
 import type { SchoolFileSlot, StoredFileMeta } from '../types/settings';
 import { validateImageFile } from '../lib/settingsStorage';
+import { resolveAssetUrl } from '../lib/authApi';
 
 export interface PendingFileState {
   file: File;
@@ -52,7 +53,8 @@ export const FileUploadCard: React.FC<FileUploadCardProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const activePreviewUrl = pendingFile?.previewUrl || savedFile?.url || null;
+  const activePreviewUrl =
+    pendingFile?.previewUrl || resolveAssetUrl(savedFile?.url) || null;
   const activeFilename = pendingFile?.file.name || savedFile?.originalName || null;
   const activeFileSize = pendingFile?.file.size || savedFile?.size || null;
 

@@ -5,6 +5,7 @@ import {
   formatCityTitleCase,
   formatIndonesianFullDate,
 } from '../lib/letterHelpers';
+import { resolveAssetUrl } from '../lib/authApi';
 
 interface SuratPindahSekolahPreviewProps {
   data: StudentAcceptedLetterData;
@@ -40,9 +41,9 @@ export const SuratPindahSekolahPreview: React.FC<
     settings.principal.name?.trim() || '........................................';
   const principalNip = settings.principal.nip?.trim();
 
-  const kopUrl = settings.files.kop?.url ?? null;
-  const ttdUrl = settings.files.ttd?.url ?? null;
-  const stempelUrl = settings.files.stempel?.url ?? null;
+  const kopUrl = resolveAssetUrl(settings.files.kop?.url);
+  const ttdUrl = resolveAssetUrl(settings.files.ttd?.url);
+  const stempelUrl = resolveAssetUrl(settings.files.stempel?.url);
 
   const hasSignatureImages =
     data.showSignatureAssets && Boolean(ttdUrl || stempelUrl);

@@ -3,7 +3,7 @@ import {
   SchoolFileSlot,
   SchoolSettings,
 } from '../types/settings';
-import { apiFetch, buildAuthHeaders, readJsonSafe } from './authApi';
+import { apiFetch, buildAuthHeaders, readJsonSafe, resolveApiUrl } from './authApi';
 import {
   deleteSchoolAssetFromCloud,
   syncServerSnapshotIfOperator,
@@ -121,7 +121,7 @@ async function mirrorSettingsToIndexedDB(settings: SchoolSettings): Promise<void
 
 export async function loadSchoolSettings(): Promise<SchoolSettings> {
   try {
-    const response = await fetch('/api/settings', {
+    const response = await fetch(resolveApiUrl('/api/settings'), {
       cache: 'no-store',
       credentials: 'include',
       headers: buildAuthHeaders(),

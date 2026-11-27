@@ -227,10 +227,52 @@ export function createDefaultLetterData(
     destinationSchool: '',
     transferReason: 'permintaan orang tua / wali siswa',
     paperSize: 'F4',
-    showKop: Boolean(settings.files.kop?.url),
+    showKop: Boolean(settings.files.kop?.url || settings.files.logo?.url || settings.identity.schoolName?.trim()),
     showSignatureAssets: Boolean(
       settings.files.ttd?.url || settings.files.stempel?.url
     ),
+    customTitle: '',
+    customSubject: '',
+    customAttachment: '',
+    customRecipient: '',
+    customBody: '',
+    customCc: '',
+    customUseSettingsSigner: true,
+    customSignerPosition: '',
+    customSignerName: '',
+    customSignerNip: '',
+  };
+}
+
+export function resolveCustomLetterSigner(
+  data: StudentAcceptedLetterData,
+  settings: SchoolSettings
+): {
+  position: string;
+  name: string;
+  nip: string;
+  usesSettings: boolean;
+} {
+  const usesSettings = data.customUseSettingsSigner !== false;
+  if (usesSettings) {
+    return {
+      position: settings.principal.position?.trim() || 'Kepala Sekolah',
+      name: settings.principal.name?.trim() || '........................................',
+      nip: settings.principal.nip?.trim() || '',
+      usesSettings: true,
+    };
+  }
+  return {
+    position:
+      data.customSignerPosition?.trim() ||
+      settings.principal.position?.trim() ||
+      'Kepala Sekolah',
+    name:
+      data.customSignerName?.trim() ||
+      settings.principal.name?.trim() ||
+      '........................................',
+    nip: data.customSignerNip?.trim() || '',
+    usesSettings: false,
   };
 }
 

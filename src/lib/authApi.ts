@@ -15,6 +15,35 @@ import {
 
 const SESSION_TOKEN_STORAGE_KEY = 'school_admin_session_token';
 
+const RAW_API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL ?? '')
+  .trim()
+  .replace(/\/+$/, '');
+
+export function getApiBaseUrl(): string {
+  return RAW_API_BASE_URL;
+}
+
+export function resolveApiUrl(pathOrUrl: string): string {
+  if (!pathOrUrl) return pathOrUrl;
+  if (
+    /^https?:\/\//i.test(pathOrUrl) ||
+    pathOrUrl.startsWith('data:') ||
+    pathOrUrl.startsWith('blob:')
+  ) {
+    return pathOrUrl;
+  }
+  const normalized = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+  return RAW_API_BASE_URL ? `${RAW_API_BASE_URL}${normalized}` : normalized;
+}
+
+export function resolveAssetUrl(pathOrUrl: string | null | undefined): string | null {
+  if (!pathOrUrl) return null;
+  if (pathOrUrl.startsWith('/uploads/')) {
+    return resolveApiUrl(pathOrUrl);
+  }
+  return pathOrUrl;
+}
+
 export const OFFLINE_SYNC_ERROR =
   'Koneksi internet atau server terputus. Perubahan belum tersinkronisasi ke server.';
 
@@ -54,8 +83,9 @@ export async function apiFetch(
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new Error(OFFLINE_SYNC_ERROR);
   }
+  const target = typeof input === 'string' ? resolveApiUrl(input) : input;
   try {
-    return await fetch(input, init);
+    return await fetch(target, init);
   } catch {
     throw new Error(OFFLINE_SYNC_ERROR);
   }
@@ -66,6 +96,7 @@ export async function readJsonSafe<T>(
   fallbackError: string
 ): Promise<T> {
   const rawText = await response.text();
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
   let parsed: unknown = null;
   let isJson = false;
 
@@ -78,6 +109,10 @@ export async function readJsonSafe<T>(
     }
   }
 
+  const looksLikeHtml =
+    !isJson &&
+    (contentType.includes('text/html') || /^\s*<!doctype|^\s*<html/i.test(rawText));
+
   if (!response.ok) {
     if (
       isJson &&
@@ -89,10 +124,20 @@ export async function readJsonSafe<T>(
     ) {
       throw new Error((parsed as { error: string }).error);
     }
+    if (looksLikeHtml || response.status === 404 || response.status === 405) {
+      throw new Error(
+        `${fallbackError} Endpoint backend tidak ditemukan di domain ini (HTTP ${response.status}). Pastikan server backend aktif dan konfigurasi VITE_API_BASE_URL atau BACKEND_URL di Netlify sudah benar.`
+      );
+    }
     throw new Error(fallbackError);
   }
 
   if (!isJson || parsed === null) {
+    if (looksLikeHtml) {
+      throw new Error(
+        `${fallbackError} Respons server berupa halaman HTML, bukan data API JSON. Periksa routing /api/* dan konfigurasi backend pada Netlify.`
+      );
+    }
     throw new Error(
       'Server mengembalikan respons yang tidak valid. Silakan muat ulang halaman atau coba lagi.'
     );
@@ -107,10 +152,14 @@ export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
     credentials: 'include',
     headers: buildAuthHeaders(),
   });
-  return readJsonSafe<AuthStatusResponse>(
+  const data = await readJsonSafe<AuthStatusResponse>(
     response,
     'Gagal memeriksa status sesi.'
   );
+  if (!data.authenticated || !data.user) {
+    setStoredSessionToken(null);
+  }
+  return data;
 }
 
 export async function setupInitialOperator(payload: {
@@ -156,11 +205,13 @@ export async function loginUser(payload: {
 
 export async function logoutUser(): Promise<void> {
   try {
-    await fetch('/api/auth/logout', {
+    await fetch(resolveApiUrl('/api/auth/logout'), {
       method: 'POST',
       credentials: 'include',
       headers: buildAuthHeaders(),
     });
+  } catch {
+    // Ensure client token is still cleared locally even if offline
   } finally {
     setStoredSessionToken(null);
   }

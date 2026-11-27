@@ -1,6 +1,9 @@
-export type LetterTypeId = 'SUKET_SISWA_DITERIMA' | 'SUKET_PINDAH_SEKOLAH';
+export type LetterTypeId =
+  | 'SUKET_SISWA_DITERIMA'
+  | 'SUKET_PINDAH_SEKOLAH'
+  | 'SURAT_LAIN_LAIN';
 
-export type LetterPaperSize = 'F4' | 'LEGAL';
+export type LetterPaperSize = 'A4' | 'F4' | 'LEGAL';
 
 export interface LetterTypeDefinition {
   id: LetterTypeId;
@@ -25,6 +28,14 @@ export const LETTER_TYPE_REGISTRY: LetterTypeDefinition[] = [
     title: 'Surat Keterangan Pindah Sekolah',
     shortTitle: 'Suket. Pindah Sekolah',
     description: 'Surat keterangan pindah sekolah (F4 / Legal).',
+    defaultNumberCode: '421.2',
+    available: true,
+  },
+  {
+    id: 'SURAT_LAIN_LAIN',
+    title: 'Surat Lain-lain',
+    shortTitle: 'Surat Lain-lain',
+    description: 'Surat resmi bebas/custom yang otomatis sinkron dengan Pengaturan sekolah.',
     defaultNumberCode: '421.2',
     available: true,
   },
@@ -54,6 +65,16 @@ export interface StudentAcceptedLetterData {
   paperSize: LetterPaperSize;
   showKop: boolean;
   showSignatureAssets: boolean;
+  customTitle: string;
+  customSubject: string;
+  customAttachment: string;
+  customRecipient: string;
+  customBody: string;
+  customCc: string;
+  customUseSettingsSigner: boolean;
+  customSignerPosition: string;
+  customSignerName: string;
+  customSignerNip: string;
 }
 
 export interface LetterRecord {

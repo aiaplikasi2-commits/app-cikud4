@@ -7,6 +7,7 @@ import {
   TendikIcon,
   AbsenSiswaIcon,
   ManajemenAkunIcon,
+  AgendaHarianIcon,
 } from './MenuIcons';
 
 export interface MenuItem {
@@ -87,6 +88,17 @@ export const BASE_MENU_ITEMS: MenuItem[] = [
     accentColor: 'rgba(255,255,255,0.22)',
     icon: <AbsenSiswaIcon className="w-16 h-16 sm:w-[74px] sm:h-[74px]" />,
   },
+  {
+    id: 'agenda-harian',
+    title: 'Agenda Harian',
+    description: 'Jadwal & Kegiatan',
+    cardClass:
+      'bg-gradient-to-br from-[#2EE6CE] via-[#0EA89B] to-[#087770] border-[#79F4E3]/80 shadow-[0_10px_24px_-6px_rgba(8,119,112,0.44)] hover:shadow-[0_16px_32px_-6px_rgba(8,119,112,0.58)]',
+    titleClass: 'text-white drop-shadow-[0_1px_2px_rgba(4,47,46,0.42)]',
+    descClass: 'text-teal-50 font-medium',
+    accentColor: 'rgba(255,255,255,0.24)',
+    icon: <AgendaHarianIcon className="w-16 h-16 sm:w-[74px] sm:h-[74px]" />,
+  },
 ];
 
 export const OPERATOR_MENU_ITEMS: MenuItem[] = [
@@ -105,7 +117,7 @@ export const OPERATOR_MENU_ITEMS: MenuItem[] = [
 ];
 
 export const GURU_MENU_ITEMS: MenuItem[] = BASE_MENU_ITEMS.filter((item) =>
-  ['siswa', 'guru', 'absen-siswa'].includes(item.id)
+  ['siswa', 'guru', 'absen-siswa', 'agenda-harian'].includes(item.id)
 );
 
 interface MenuGridProps {

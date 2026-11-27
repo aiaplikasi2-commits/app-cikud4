@@ -17,6 +17,8 @@ import { TeacherDataPage } from './components/TeacherDataPage';
 import { StudentListPage } from './components/StudentListPage';
 import { LettersPage } from './components/LettersPage';
 import { AttendancePage } from './components/AttendancePage';
+import { AgendaHarianPage } from './components/AgendaHarianPage';
+import { AgendaDashboardWidget } from './components/AgendaDashboardWidget';
 import {
   AppNavigationTarget,
   BottomTabId,
@@ -29,6 +31,7 @@ import { buildAuthHeaders, fetchAuthStatus, logoutUser } from './lib/authApi';
 import { loadSchoolSettings } from './lib/settingsStorage';
 import { auth, onAuthStateChanged, type FirebaseUser } from './lib/firebase';
 import { runFullCloudSync } from './lib/firestoreSync';
+import { PWAPromptBanner } from './components/PWAPromptBanner';
 
 type OperatorView =
   | 'beranda'
@@ -38,8 +41,9 @@ type OperatorView =
   | 'absen-siswa'
   | 'guru'
   | 'tendik'
-  | 'surat';
-type GuruView = 'beranda' | 'siswa' | 'absen-siswa' | 'guru';
+  | 'surat'
+  | 'agenda-harian';
+type GuruView = 'beranda' | 'siswa' | 'absen-siswa' | 'guru' | 'agenda-harian';
 
 const EMPTY_PUBLIC_SCHOOL: PublicSchoolInfo = {
   schoolName: '',
@@ -57,6 +61,7 @@ function parseOperatorViewFromPath(pathname: string): OperatorView {
   if (clean === '/guru') return 'guru';
   if (clean === '/tendik') return 'tendik';
   if (clean === '/surat') return 'surat';
+  if (clean === '/agenda-harian') return 'agenda-harian';
   return 'beranda';
 }
 
@@ -65,6 +70,7 @@ function parseGuruViewFromPath(pathname: string): GuruView {
   if (clean === '/siswa') return 'siswa';
   if (clean === '/absen-siswa') return 'absen-siswa';
   if (clean === '/guru') return 'guru';
+  if (clean === '/agenda-harian') return 'agenda-harian';
   return 'beranda';
 }
 
@@ -76,6 +82,7 @@ function getPathForOperatorView(view: OperatorView): string {
   if (view === 'guru') return '/guru';
   if (view === 'tendik') return '/tendik';
   if (view === 'surat') return '/surat';
+  if (view === 'agenda-harian') return '/agenda-harian';
   return '/';
 }
 
@@ -122,6 +129,7 @@ export default function App() {
   const [settings, setSettings] = useState<SchoolSettings>(EMPTY_SCHOOL_SETTINGS);
   const [letterPreselectedStudent, setLetterPreselectedStudent] =
     useState<StudentRecord | null>(null);
+  const [agendaOpenCreate, setAgendaOpenCreate] = useState(false);
   const [cloudUser, setCloudUser] = useState<FirebaseUser | null>(null);
   const cloudSyncLockRef = useRef(false);
 
@@ -145,19 +153,24 @@ export default function App() {
     }
   }, []);
 
-  const refreshAuth = useCallback(async () => {
+  const refreshAuth = useCallback(async (preserveOnTransientError = false) => {
     try {
       const status = await fetchAuthStatus();
       setNeedsInitialSetup(status.needsInitialSetup);
       setPublicSchool(status.school);
       setCurrentUser(status.user);
+      if (status.authenticated && status.user) {
+        setLoginNotice(null);
+      }
     } catch (err) {
-      setCurrentUser(null);
-      setLoginNotice(
-        err instanceof Error
-          ? err.message
-          : 'Tidak dapat terhubung ke server autentikasi.'
-      );
+      if (!preserveOnTransientError) {
+        setCurrentUser(null);
+        setLoginNotice(
+          err instanceof Error
+            ? err.message
+            : 'Tidak dapat terhubung ke server autentikasi.'
+        );
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -195,6 +208,7 @@ export default function App() {
           summary.restoredFromCloud.teachers > 0 ||
           summary.restoredFromCloud.letters > 0 ||
           summary.restoredFromCloud.attendance > 0 ||
+          summary.restoredFromCloud.agendas > 0 ||
           summary.restoredFromCloud.settingsUpdated;
         if (restoredSomething) {
           await refreshAuth();
@@ -324,7 +338,7 @@ export default function App() {
     setOperatorView('beranda');
     setGuruView('beranda');
     navigateUrl('/', true);
-    refreshAuth();
+    void refreshAuth(true);
   };
 
   const handleLogout = async () => {
@@ -356,7 +370,8 @@ export default function App() {
         currentUser.role === 'GURU' &&
         target !== 'siswa' &&
         target !== 'absen-siswa' &&
-        target !== 'guru'
+        target !== 'guru' &&
+        target !== 'agenda-harian'
       ) {
         return;
       }
@@ -374,6 +389,24 @@ export default function App() {
     [currentUser, navigateUrl]
   );
 
+  const handleOpenAgendaFromDashboard = useCallback(
+    (openCreate = false) => {
+      if (!currentUser) return;
+      setAgendaOpenCreate(Boolean(openCreate));
+      setActiveTab('beranda');
+      setSelectedMenuId('agenda-harian');
+      if (currentUser.role === 'GURU') {
+        setGuruView('agenda-harian');
+        navigateUrl('/agenda-harian');
+      } else {
+        setOperatorView('agenda-harian');
+        navigateUrl('/agenda-harian');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [currentUser, navigateUrl]
+  );
+
   const handleSelectOperatorMenu = (menu: MenuItem) => {
     setActiveTab('beranda');
     setSelectedMenuId(menu.id);
@@ -384,8 +417,12 @@ export default function App() {
       menu.id === 'absen-siswa' ||
       menu.id === 'guru' ||
       menu.id === 'tendik' ||
-      menu.id === 'surat'
+      menu.id === 'surat' ||
+      menu.id === 'agenda-harian'
     ) {
+      if (menu.id === 'agenda-harian') {
+        setAgendaOpenCreate(false);
+      }
       setOperatorView(menu.id);
       navigateUrl(getPathForOperatorView(menu.id));
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -398,8 +435,12 @@ export default function App() {
     if (
       menu.id === 'siswa' ||
       menu.id === 'absen-siswa' ||
-      menu.id === 'guru'
+      menu.id === 'guru' ||
+      menu.id === 'agenda-harian'
     ) {
+      if (menu.id === 'agenda-harian') {
+        setAgendaOpenCreate(false);
+      }
       setGuruView(menu.id);
       navigateUrl(`/${menu.id}`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -417,49 +458,58 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="min-h-dvh bg-[#F4F7FC] flex items-center justify-center p-6">
-        <div className="rounded-2xl bg-white border border-slate-200 px-6 py-5 shadow-xs text-center">
-          <p className="text-sm font-semibold text-slate-700">
-            Memuat Sistem Administrasi Sekolah...
-          </p>
+      <>
+        <PWAPromptBanner />
+        <div className="min-h-dvh bg-[#F4F7FC] flex items-center justify-center p-6">
+          <div className="rounded-2xl bg-white border border-slate-200 px-6 py-5 shadow-xs text-center">
+            <p className="text-sm font-semibold text-slate-700">
+              Memuat Sistem Administrasi Sekolah...
+            </p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (!currentUser) {
     return (
-      <LoginPage
-        school={publicSchool}
-        needsInitialSetup={needsInitialSetup}
-        initialNotice={
-          !isOnline
-            ? 'Koneksi internet atau server terputus. Pastikan perangkat terhubung ke internet untuk login.'
-            : loginNotice
-        }
-        resetToken={resetToken}
-        onClearResetToken={() => {
-          setResetToken(null);
-          navigateUrl('/login', true);
-        }}
-        onAuthenticated={handleAuthenticated}
-        onCloudRestored={refreshAuth}
-      />
+      <>
+        <PWAPromptBanner />
+        <LoginPage
+          school={publicSchool}
+          needsInitialSetup={needsInitialSetup}
+          initialNotice={
+            !isOnline
+              ? 'Koneksi internet atau server terputus. Pastikan perangkat terhubung ke internet untuk login.'
+              : loginNotice
+          }
+          resetToken={resetToken}
+          onClearResetToken={() => {
+            setResetToken(null);
+            navigateUrl('/login', true);
+          }}
+          onAuthenticated={handleAuthenticated}
+          onCloudRestored={() => refreshAuth()}
+        />
+      </>
     );
   }
 
   if (currentUser.mustChangePassword) {
     return (
-      <ForcePasswordChangeScreen
-        user={currentUser}
-        school={publicSchool}
-        onPasswordChanged={(updatedUser) => {
-          setCurrentUser(updatedUser);
-          navigateUrl('/', true);
-        }}
-        onLogout={handleLogout}
-        loggingOut={loggingOut}
-      />
+      <>
+        <PWAPromptBanner />
+        <ForcePasswordChangeScreen
+          user={currentUser}
+          school={publicSchool}
+          onPasswordChanged={(updatedUser) => {
+            setCurrentUser(updatedUser);
+            navigateUrl('/', true);
+          }}
+          onLogout={handleLogout}
+          loggingOut={loggingOut}
+        />
+      </>
     );
   }
 
@@ -541,6 +591,21 @@ export default function App() {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
             />
+          ) : guruView === 'agenda-harian' ? (
+            <AgendaHarianPage
+              user={currentUser}
+              schoolName={publicSchool.schoolName}
+              initialOpenCreate={agendaOpenCreate}
+              onConsumedInitialCreate={() => setAgendaOpenCreate(false)}
+              onBack={() => {
+                setAgendaOpenCreate(false);
+                setGuruView('beranda');
+                setActiveTab('beranda');
+                setSelectedMenuId(null);
+                navigateUrl('/');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
           ) : activeTab !== 'beranda' ? (
             <BottomTabViews
               tab={activeTab as BottomTabId}
@@ -580,6 +645,7 @@ export default function App() {
                 school={publicSchool}
                 selectedMenuId={selectedMenuId}
                 onSelectMenu={handleSelectGuruMenu}
+                onOpenAgenda={handleOpenAgendaFromDashboard}
                 onOpenProfil={() => handleSelectTab('profil')}
                 onLogout={handleLogout}
                 loggingOut={loggingOut}
@@ -687,6 +753,23 @@ export default function App() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           />
+        ) : operatorView === 'agenda-harian' ? (
+          <AgendaHarianPage
+            user={currentUser}
+            schoolName={
+              settings.identity.schoolName || publicSchool.schoolName
+            }
+            initialOpenCreate={agendaOpenCreate}
+            onConsumedInitialCreate={() => setAgendaOpenCreate(false)}
+            onBack={() => {
+              setAgendaOpenCreate(false);
+              setOperatorView('beranda');
+              setActiveTab('beranda');
+              setSelectedMenuId(null);
+              navigateUrl(getPathForOperatorView('beranda'));
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         ) : activeTab !== 'beranda' ? (
           <BottomTabViews
             tab={activeTab as BottomTabId}
@@ -739,12 +822,19 @@ export default function App() {
               selectedMenuId={selectedMenuId}
               onSelectMenu={handleSelectOperatorMenu}
             />
+
+            {/* Ringkasan Agenda Harian Operator */}
+            <AgendaDashboardWidget
+              userRole="OPERATOR"
+              onOpenAgenda={handleOpenAgendaFromDashboard}
+            />
           </div>
         )}
         </div>
       </main>
 
       <BottomNav activeTab={activeTab} onSelectTab={handleSelectTab} />
+      <PWAPromptBanner />
     </div>
   );
 }

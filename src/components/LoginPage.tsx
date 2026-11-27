@@ -20,6 +20,7 @@ import {
   confirmPasswordReset,
   loginUser,
   requestForgotPassword,
+  resolveAssetUrl,
   setupInitialOperator,
   validateResetToken,
 } from '../lib/authApi';
@@ -92,7 +93,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const effectiveLogoSrc = school.logoUrl || '/assets/aistudio/logo_1128ead8.png';
+  const effectiveLogoSrc =
+    resolveAssetUrl(school.logoUrl) || '/assets/aistudio/logo_1128ead8.png';
 
   useEffect(() => {
     setLogoError(false);

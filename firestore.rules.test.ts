@@ -14,7 +14,7 @@ const rulesText = fs.readFileSync(rulesPath, 'utf-8');
 
 // 1. Pastikan seluruh koleksi blueprint tercakup di firestore.rules
 const expectedPaths = Object.keys(blueprint.firestore || {});
-assert.ok(expectedPaths.length === 7, 'Harus ada 7 koleksi terdaftar di firebase-blueprint.json');
+assert.ok(expectedPaths.length === 8, 'Harus ada 8 koleksi terdaftar di firebase-blueprint.json');
 
 for (const colPath of expectedPaths) {
   const leaf = colPath.split('/').slice(-2).join('/');
@@ -30,6 +30,10 @@ assert.ok(
 assert.ok(
   rulesText.includes('match /attendance/{attendanceId}'),
   'Match block match /attendance/{attendanceId} wajib ada di firestore.rules'
+);
+assert.ok(
+  rulesText.includes('match /agendas/{agendaId}'),
+  'Match block match /agendas/{agendaId} wajib ada di firestore.rules'
 );
 
 // 2. Pastikan Global Catch-All Deny & Email Verified Gate aktif
@@ -62,6 +66,7 @@ const dirtyPayloads = [
   { name: 'Invalid Role Enum', role: 'SUPERADMIN' },
   { name: 'Invalid Letter Type Enum', letterType: 'UNKNOWN_SURAT' },
   { name: 'Invalid Attendance Kind Enum', attendanceKind: 'RANDOM_KIND' },
+  { name: 'Invalid Agenda Status Enum', agendaStatus: 'INVALID_STATUS' },
 ];
 
 for (const payload of dirtyPayloads) {
@@ -88,7 +93,7 @@ for (const payload of dirtyPayloads) {
   }
   if ('letterType' in payload && payload.letterType) {
     assert.strictEqual(
-      ['SUKET_SISWA_DITERIMA', 'SUKET_PINDAH_SEKOLAH'].includes(payload.letterType),
+      ['SUKET_SISWA_DITERIMA', 'SUKET_PINDAH_SEKOLAH', 'SURAT_LAIN_LAIN'].includes(payload.letterType),
       false,
       `${payload.name} harus ditolak`
     );
@@ -96,6 +101,13 @@ for (const payload of dirtyPayloads) {
   if ('attendanceKind' in payload && payload.attendanceKind) {
     assert.strictEqual(
       ['HOMEROOM_MAP', 'DAILY_SHEET'].includes(payload.attendanceKind),
+      false,
+      `${payload.name} harus ditolak`
+    );
+  }
+  if ('agendaStatus' in payload && payload.agendaStatus) {
+    assert.strictEqual(
+      ['DIRENCANAKAN', 'BERLANGSUNG', 'SELESAI', 'DIBATALKAN'].includes(payload.agendaStatus),
       false,
       `${payload.name} harus ditolak`
     );

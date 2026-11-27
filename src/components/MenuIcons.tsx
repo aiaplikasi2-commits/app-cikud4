@@ -358,3 +358,48 @@ export const ManajemenAkunIcon: React.FC<IconProps> = ({
     </svg>
   );
 };
+
+export const AgendaHarianIcon: React.FC<IconProps> = ({
+  className = 'w-16 h-16',
+}) => {
+  const uid = useId();
+  return (
+    <svg viewBox="0 0 80 80" fill="none" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id={`${uid}-book`} x1="16" y1="16" x2="62" y2="62" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#FFFFFF" />
+          <stop offset="1" stopColor="#ECFDF5" />
+        </linearGradient>
+        <linearGradient id={`${uid}-hdr`} x1="18" y1="14" x2="58" y2="29" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#F59E0B" />
+          <stop offset="1" stopColor="#EA580C" />
+        </linearGradient>
+        <linearGradient id={`${uid}-badge`} x1="48" y1="42" x2="68" y2="62" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#34D399" />
+          <stop offset="1" stopColor="#059669" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="40" cy="68" rx="25" ry="4.5" fill="#042F2E" fillOpacity="0.24" />
+      {/* Back Page */}
+      <rect x="20" y="18" width="42" height="42" rx="6" fill="#CCFBF1" stroke="#0F766E" strokeWidth="1.2" />
+      {/* Main Calendar/Agenda Card */}
+      <rect x="16" y="15" width="42" height="43" rx="6" fill={`url(#${uid}-book)`} stroke="#0F766E" strokeWidth="1.5" />
+      {/* Header Band */}
+      <path d="M16 21C16 17.7 18.7 15 22 15H52C55.3 15 58 17.7 58 21V28H16V21Z" fill={`url(#${uid}-hdr)`} />
+      {/* Spiral Rings */}
+      <rect x="24" y="11" width="4.5" height="8" rx="2.2" fill="#F8FAFC" stroke="#475569" strokeWidth="1.2" />
+      <rect x="35" y="11" width="4.5" height="8" rx="2.2" fill="#F8FAFC" stroke="#475569" strokeWidth="1.2" />
+      <rect x="46" y="11" width="4.5" height="8" rx="2.2" fill="#F8FAFC" stroke="#475569" strokeWidth="1.2" />
+      {/* Agenda Rows */}
+      <circle cx="23.5" cy="34.5" r="2.2" fill="#0D9488" />
+      <line x1="28.5" y1="34.5" x2="49" y2="34.5" stroke="#0F766E" strokeWidth="2.3" strokeLinecap="round" />
+      <circle cx="23.5" cy="42.5" r="2.2" fill="#F59E0B" />
+      <line x1="28.5" y1="42.5" x2="45" y2="42.5" stroke="#64748B" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="23.5" cy="50.5" r="2.2" fill="#3B82F6" />
+      <line x1="28.5" y1="50.5" x2="41" y2="50.5" stroke="#94A3B8" strokeWidth="2.2" strokeLinecap="round" />
+      {/* Checkmark Floating Badge */}
+      <circle cx="57" cy="52" r="11.5" fill={`url(#${uid}-badge)`} stroke="#FFFFFF" strokeWidth="2.4" />
+      <path d="M52 52.2L55.5 55.7L62.2 48.5" stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+};

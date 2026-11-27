@@ -206,7 +206,7 @@
       "properties": {
         "ownerUid": { "type": "string", "maxLength": 128 },
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "type": { "type": "string", "enum": ["SUKET_SISWA_DITERIMA", "SUKET_PINDAH_SEKOLAH"], "maxLength": 60 },
+        "type": { "type": "string", "enum": ["SUKET_SISWA_DITERIMA", "SUKET_PINDAH_SEKOLAH", "SURAT_LAIN_LAIN"], "maxLength": 60 },
         "title": { "type": "string", "maxLength": 150 },
         "letterNumber": { "type": "string", "maxLength": 100 },
         "letterDate": { "type": "string", "maxLength": 40 },
@@ -270,6 +270,77 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "Agenda": {
+      "title": "Agenda",
+      "description": "Data agenda harian kegiatan sekolah dan pengaturan kategori/hak akses agenda",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "kind": { "type": "string", "enum": ["AGENDA_ITEM", "AGENDA_CONFIG"], "maxLength": 30 },
+        "title": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 20 },
+        "startTime": { "type": "string", "maxLength": 10 },
+        "endTime": { "type": "string", "maxLength": 10 },
+        "category": { "type": "string", "maxLength": 80 },
+        "picId": { "type": "string", "maxLength": 128 },
+        "picName": { "type": "string", "maxLength": 150 },
+        "participantIds": { "type": "array", "items": { "type": "string" } },
+        "participantNames": { "type": "array", "items": { "type": "string" } },
+        "extraParticipants": { "type": "string", "maxLength": 300 },
+        "location": { "type": "string", "maxLength": 180 },
+        "description": { "type": "string", "maxLength": 1500 },
+        "notes": { "type": "string", "maxLength": 800 },
+        "status": {
+          "type": "string",
+          "enum": ["DIRENCANAKAN", "BERLANGSUNG", "SELESAI", "DIBATALKAN"],
+          "maxLength": 30
+        },
+        "visibility": { "type": "string", "enum": ["SCHOOL", "PERSONAL"], "maxLength": 20 },
+        "createdByUserId": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 150 },
+        "createdByRole": { "type": "string", "enum": ["OPERATOR", "GURU"], "maxLength": 20 },
+        "updatedByName": { "type": "string", "maxLength": 150 },
+        "categories": { "type": "array", "items": { "type": "string" } },
+        "allowGuruCreate": { "type": "boolean" },
+        "allowOperatorViewGuruPersonal": { "type": "boolean" },
+        "clientCreatedAt": { "type": "string", "maxLength": 64 },
+        "clientUpdatedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "id",
+        "kind",
+        "title",
+        "date",
+        "startTime",
+        "endTime",
+        "category",
+        "picId",
+        "picName",
+        "participantIds",
+        "participantNames",
+        "extraParticipants",
+        "location",
+        "description",
+        "notes",
+        "status",
+        "visibility",
+        "createdByUserId",
+        "createdByName",
+        "createdByRole",
+        "updatedByName",
+        "categories",
+        "allowGuruCreate",
+        "allowOperatorViewGuruPersonal",
+        "clientCreatedAt",
+        "clientUpdatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -300,6 +371,10 @@
     "/schools/{schoolId}/attendance/{attendanceId}": {
       "schema": { "$ref": "#/entities/Attendance" },
       "description": "Koleksi data absensi harian siswa dan penetapan wali kelas"
+    },
+    "/schools/{schoolId}/agendas/{agendaId}": {
+      "schema": { "$ref": "#/entities/Agenda" },
+      "description": "Koleksi agenda harian kegiatan sekolah dan pengaturan agenda"
     }
   }
 }

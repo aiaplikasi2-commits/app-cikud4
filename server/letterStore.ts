@@ -25,11 +25,13 @@ function cleanStr(val: unknown): string {
 
 function sanitizeLetterType(val: unknown): LetterTypeId {
   if (val === 'SUKET_PINDAH_SEKOLAH') return 'SUKET_PINDAH_SEKOLAH';
+  if (val === 'SURAT_LAIN_LAIN') return 'SURAT_LAIN_LAIN';
   return 'SUKET_SISWA_DITERIMA';
 }
 
 function sanitizePaperSize(val: unknown): LetterPaperSize {
   if (val === 'LEGAL') return 'LEGAL';
+  if (val === 'A4') return 'A4';
   return 'F4';
 }
 
@@ -68,14 +70,49 @@ function sanitizeLetterData(
     paperSize: sanitizePaperSize(input?.paperSize),
     showKop: input?.showKop !== false,
     showSignatureAssets: input?.showSignatureAssets !== false,
+    customTitle: cleanStr(input?.customTitle),
+    customSubject: cleanStr(input?.customSubject),
+    customAttachment: cleanStr(input?.customAttachment),
+    customRecipient: cleanStr(input?.customRecipient),
+    customBody: cleanStr(input?.customBody),
+    customCc: cleanStr(input?.customCc),
+    customUseSettingsSigner: input?.customUseSettingsSigner !== false,
+    customSignerPosition: cleanStr(input?.customSignerPosition),
+    customSignerName: cleanStr(input?.customSignerName),
+    customSignerNip: cleanStr(input?.customSignerNip),
   };
 }
 
-function getTitleForType(type: LetterTypeId): string {
+function getTitleForType(
+  type: LetterTypeId,
+  data?: Partial<StudentAcceptedLetterData>
+): string {
   if (type === 'SUKET_PINDAH_SEKOLAH') {
     return 'Surat Keterangan Pindah Sekolah';
   }
+  if (type === 'SURAT_LAIN_LAIN') {
+    return cleanStr(data?.customTitle) || 'Surat Lain-lain';
+  }
   return 'Surat Ket. Diterima';
+}
+
+function getRecipientForRecord(
+  type: LetterTypeId,
+  data: StudentAcceptedLetterData
+): string {
+  if (type === 'SURAT_LAIN_LAIN') {
+    const firstRecipientLine = data.customRecipient
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    const candidate =
+      firstRecipientLine ||
+      data.customSubject ||
+      data.customTitle ||
+      'Umum';
+    return candidate.slice(0, 200);
+  }
+  return data.studentName;
 }
 
 export function createLetterStore(storageDir: string) {
@@ -147,6 +184,11 @@ export function createLetterStore(storageDir: string) {
           (item.data.destinationSchool || '').toLowerCase().includes(search) ||
           (item.data.nipdNisn || '').toLowerCase().includes(search) ||
           (item.data.parentName || '').toLowerCase().includes(search) ||
+          (item.data.customTitle || '').toLowerCase().includes(search) ||
+          (item.data.customSubject || '').toLowerCase().includes(search) ||
+          (item.data.customRecipient || '').toLowerCase().includes(search) ||
+          (item.data.customBody || '').toLowerCase().includes(search) ||
+          (item.data.customSignerName || '').toLowerCase().includes(search) ||
           item.title.toLowerCase().includes(search)
         );
       })
@@ -178,7 +220,14 @@ export function createLetterStore(storageDir: string) {
     if (!data.letterNumber) {
       throw new LetterStoreError(400, 'Nomor surat wajib diisi.');
     }
-    if (!data.studentName) {
+    if (type === 'SURAT_LAIN_LAIN') {
+      if (!data.customTitle) {
+        throw new LetterStoreError(400, 'Judul surat wajib diisi.');
+      }
+      if (!data.customBody) {
+        throw new LetterStoreError(400, 'Isi surat wajib diisi.');
+      }
+    } else if (!data.studentName) {
       throw new LetterStoreError(400, 'Nama siswa pada surat wajib diisi.');
     }
     return { type, data };
@@ -192,11 +241,11 @@ export function createLetterStore(storageDir: string) {
     const record: LetterRecord = {
       id: crypto.randomUUID(),
       type,
-      title: getTitleForType(type),
+      title: getTitleForType(type, data),
       letterNumber: data.letterNumber,
       letterDate: data.letterDate,
-      studentId: data.studentId,
-      recipientName: data.studentName,
+      studentId: type === 'SURAT_LAIN_LAIN' ? null : data.studentId,
+      recipientName: getRecipientForRecord(type, data),
       data,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -222,11 +271,11 @@ export function createLetterStore(storageDir: string) {
     const updated: LetterRecord = {
       ...existing,
       type,
-      title: getTitleForType(type),
+      title: getTitleForType(type, data),
       letterNumber: data.letterNumber,
       letterDate: data.letterDate,
-      studentId: data.studentId,
-      recipientName: data.studentName,
+      studentId: type === 'SURAT_LAIN_LAIN' ? null : data.studentId,
+      recipientName: getRecipientForRecord(type, data),
       data,
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
@@ -264,19 +313,25 @@ export function createLetterStore(storageDir: string) {
       if (!raw || typeof raw !== 'object') continue;
       const item = raw as Partial<LetterRecord>;
       const id = String(item.id ?? '').trim();
-      const data = sanitizeLetterData(item.data);
-      if (!id || !data.letterNumber || !data.studentName) continue;
-
       const type = sanitizeLetterType(item.type);
+      const data = sanitizeLetterData(item.data);
+      const hasPrimaryContent =
+        type === 'SURAT_LAIN_LAIN'
+          ? Boolean(data.customTitle || data.customBody)
+          : Boolean(data.studentName);
+      if (!id || !data.letterNumber || !hasPrimaryContent) continue;
+
       const nowIso = new Date().toISOString();
       const normalized: LetterRecord = {
         id,
         type,
-        title: String(item.title ?? '').trim() || getTitleForType(type),
+        title: String(item.title ?? '').trim() || getTitleForType(type, data),
         letterNumber: data.letterNumber,
         letterDate: data.letterDate,
-        studentId: data.studentId,
-        recipientName: data.studentName,
+        studentId: type === 'SURAT_LAIN_LAIN' ? null : data.studentId,
+        recipientName:
+          String(item.recipientName ?? '').trim() ||
+          getRecipientForRecord(type, data),
         data,
         createdAt: String(item.createdAt ?? '').trim() || nowIso,
         updatedAt: String(item.updatedAt ?? '').trim() || nowIso,

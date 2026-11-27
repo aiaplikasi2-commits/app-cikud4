@@ -44,6 +44,7 @@ export type AppNavigationTarget =
   | 'guru'
   | 'tendik'
   | 'surat'
+  | 'agenda-harian'
   | 'profil';
 
 interface BottomTabViewsProps {

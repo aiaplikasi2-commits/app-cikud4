@@ -4,7 +4,9 @@ import type { LetterTypeId, StudentAcceptedLetterData } from '../types/letter';
 import {
   formatCityTitleCase,
   formatIndonesianFullDate,
+  resolveCustomLetterSigner,
 } from './letterHelpers';
+import { resolveAssetUrl } from './authApi';
 
 interface LoadedImageInfo {
   dataUrl: string;
@@ -14,9 +16,10 @@ interface LoadedImageInfo {
 }
 
 async function loadImageForPdf(url: string | null | undefined): Promise<LoadedImageInfo | null> {
-  if (!url) return null;
+  const resolvedUrl = resolveAssetUrl(url);
+  if (!resolvedUrl) return null;
   try {
-    const response = await fetch(url, { credentials: 'include' });
+    const response = await fetch(resolvedUrl, { credentials: 'include' });
     if (!response.ok) return null;
     const blob = await response.blob();
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -121,6 +124,7 @@ async function drawSignatureBlock(
     position: string;
     principalName: string;
     principalNip: string;
+    showNipLine?: boolean;
     x: number;
     startY: number;
     showAssets: boolean;
@@ -170,9 +174,11 @@ async function drawSignatureBlock(
   doc.setLineWidth(0.35);
   doc.line(opts.x, y + 0.9, opts.x + nameW, y + 0.9);
 
-  y += 5.2;
-  doc.setFont('times', 'normal');
-  doc.text(`NIP. ${opts.principalNip || '—'}`, opts.x, y);
+  if (opts.showNipLine !== false) {
+    y += 5.2;
+    doc.setFont('times', 'normal');
+    doc.text(`NIP. ${opts.principalNip || '—'}`, opts.x, y);
+  }
   return y;
 }
 
@@ -182,11 +188,19 @@ export async function downloadLetterPdf(
   settings: SchoolSettings
 ): Promise<void> {
   const isPindah = type === 'SUKET_PINDAH_SEKOLAH';
-  const formatOption: 'a4' | [number, number] = !isPindah
-    ? 'a4'
-    : data.paperSize === 'LEGAL'
+  const isCustom = type === 'SURAT_LAIN_LAIN';
+
+  const formatOption: 'a4' | [number, number] = isPindah
+    ? data.paperSize === 'LEGAL'
       ? [215.9, 355.6]
-      : [215, 330];
+      : [215, 330]
+    : isCustom
+      ? data.paperSize === 'LEGAL'
+        ? [215.9, 355.6]
+        : data.paperSize === 'F4'
+          ? [215, 330]
+          : 'a4'
+      : 'a4';
 
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -195,12 +209,16 @@ export async function downloadLetterPdf(
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 20;
   const contentWidth = pageWidth - marginX * 2;
   let y = 16;
 
-  const [kopImg, ttdImg, stempelImg] = await Promise.all([
+  const [kopImg, logoImg, ttdImg, stempelImg] = await Promise.all([
     data.showKop ? loadImageForPdf(settings.files.kop?.url) : Promise.resolve(null),
+    data.showKop && !settings.files.kop?.url
+      ? loadImageForPdf(settings.files.logo?.url)
+      : Promise.resolve(null),
     data.showSignatureAssets
       ? loadImageForPdf(settings.files.ttd?.url)
       : Promise.resolve(null),
@@ -208,6 +226,15 @@ export async function downloadLetterPdf(
       ? loadImageForPdf(settings.files.stempel?.url)
       : Promise.resolve(null),
   ]);
+
+  const schoolNameRaw =
+    settings.identity.schoolName?.trim() || '[Nama Sekolah di Pengaturan]';
+  const rawLoc =
+    data.schoolLocationLine?.trim() || settings.identity.city?.trim() || '';
+  const schoolLocation =
+    rawLoc && rawLoc === rawLoc.toUpperCase()
+      ? formatCityTitleCase(rawLoc)
+      : rawLoc;
 
   if (kopImg) {
     const targetW = contentWidth;
@@ -223,15 +250,53 @@ export async function downloadLetterPdf(
       drawH
     );
     y += drawH + 3;
+  } else if (isCustom && data.showKop) {
+    const headerStartY = y - 2;
+    if (logoImg) {
+      const logoH = 18;
+      const logoW = Math.min(
+        20,
+        (logoImg.width / Math.max(1, logoImg.height)) * logoH
+      );
+      doc.addImage(
+        logoImg.dataUrl,
+        logoImg.format,
+        marginX,
+        headerStartY,
+        logoW,
+        logoH
+      );
+    }
+    const departmentName = settings.identity.department?.trim();
+    let headerY = headerStartY + 4.5;
+    doc.setTextColor(0, 0, 0);
+    if (departmentName) {
+      doc.setFont('times', 'bold');
+      doc.setFontSize(11);
+      doc.text(departmentName.toUpperCase(), pageWidth / 2, headerY, {
+        align: 'center',
+      });
+      headerY += 5.5;
+    }
+    doc.setFont('times', 'bold');
+    doc.setFontSize(14.5);
+    doc.text(schoolNameRaw.toUpperCase(), pageWidth / 2, headerY, {
+      align: 'center',
+    });
+    headerY += 5;
+    if (schoolLocation) {
+      doc.setFont('times', 'normal');
+      doc.setFontSize(10);
+      doc.text(schoolLocation, pageWidth / 2, headerY, { align: 'center' });
+      headerY += 4;
+    }
+    const lineY = Math.max(headerStartY + 20, headerY + 1);
+    doc.setLineWidth(0.75);
+    doc.line(marginX, lineY, pageWidth - marginX, lineY);
+    doc.setLineWidth(0.25);
+    doc.line(marginX, lineY + 1.1, pageWidth - marginX, lineY + 1.1);
+    y = lineY + 8;
   }
-
-  const schoolNameRaw =
-    settings.identity.schoolName?.trim() || '[Nama Sekolah di Pengaturan]';
-  const rawLoc = data.schoolLocationLine?.trim() || '';
-  const schoolLocation =
-    rawLoc && rawLoc === rawLoc.toUpperCase()
-      ? formatCityTitleCase(rawLoc)
-      : rawLoc;
 
   const rawLetterCity =
     data.letterCity?.trim() || settings.identity.city?.trim() || 'Bekasi';
@@ -249,7 +314,160 @@ export async function downloadLetterPdf(
 
   doc.setTextColor(0, 0, 0);
 
-  if (isPindah) {
+  if (isCustom) {
+    const titleUpper = (data.customTitle?.trim() || 'JUDUL SURAT').toUpperCase();
+    doc.setFont('times', 'bold');
+    doc.setFontSize(13.5);
+    const titleLines = doc.splitTextToSize(titleUpper, contentWidth) as string[];
+    if (titleLines.length === 1) {
+      drawCenteredUnderlinedTitle(doc, titleLines[0], pageWidth / 2, y, 13.5);
+      y += 6;
+    } else {
+      doc.text(titleLines, pageWidth / 2, y, { align: 'center' });
+      y += titleLines.length * 6;
+    }
+
+    if (data.letterNumber?.trim()) {
+      doc.setFont('times', 'normal');
+      doc.setFontSize(11.5);
+      doc.text(
+        `Nomor : ${data.letterNumber.trim()}`,
+        pageWidth / 2,
+        y,
+        { align: 'center' }
+      );
+      y += 8;
+    } else {
+      y += 4;
+    }
+
+    const attachmentText = data.customAttachment?.trim();
+    const subjectText = data.customSubject?.trim();
+    const recipientText = data.customRecipient?.trim();
+
+    if (attachmentText || subjectText || recipientText) {
+      doc.setFontSize(11.5);
+      const hasLeftMeta = Boolean(attachmentText || subjectText);
+      const leftBlockStartY = y;
+      let leftEndY = y;
+      if (hasLeftMeta) {
+        const leftMaxW = recipientText ? contentWidth * 0.54 - 22 : contentWidth - 22;
+        if (attachmentText) {
+          leftEndY = drawKeyValueRow(doc, {
+            label: 'Lampiran',
+            value: attachmentText,
+            labelX: marginX,
+            colonX: marginX + 19,
+            valueX: marginX + 22,
+            maxValueWidth: leftMaxW,
+            y: leftEndY,
+            lineHeight: 5.5,
+          });
+        }
+        if (subjectText) {
+          leftEndY = drawKeyValueRow(doc, {
+            label: 'Perihal',
+            value: subjectText,
+            labelX: marginX,
+            colonX: marginX + 19,
+            valueX: marginX + 22,
+            maxValueWidth: leftMaxW,
+            y: leftEndY,
+            lineHeight: 5.5,
+            boldValue: true,
+          });
+        }
+      }
+
+      let rightEndY = y;
+      if (recipientText) {
+        const recX = hasLeftMeta ? marginX + contentWidth * 0.58 : marginX;
+        const recMaxW = pageWidth - marginX - recX;
+        doc.setFont('times', 'normal');
+        doc.text('Kepada Yth.', recX, leftBlockStartY);
+        rightEndY = leftBlockStartY + 5.5;
+        const recLines = recipientText
+          .replace(/\r\n/g, '\n')
+          .split('\n')
+          .flatMap((line) => doc.splitTextToSize(line || ' ', recMaxW) as string[]);
+        doc.text(recLines, recX, rightEndY);
+        rightEndY += recLines.length * 5.5;
+      }
+
+      y = Math.max(leftEndY, rightEndY) + 6;
+    } else {
+      y += 4;
+    }
+
+    const bodyParagraphs = (data.customBody || '').replace(/\r\n/g, '\n').split('\n');
+    doc.setFont('times', 'normal');
+    doc.setFontSize(11.5);
+    const bottomLimit = pageHeight - 22;
+
+    for (const rawLine of bodyParagraphs) {
+      if (rawLine.trim() === '') {
+        y += 4.2;
+        if (y > bottomLimit) {
+          doc.addPage();
+          y = 20;
+        }
+        continue;
+      }
+      const wrapped = doc.splitTextToSize(rawLine, contentWidth) as string[];
+      for (const wLine of wrapped) {
+        if (y > bottomLimit) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.text(wLine, marginX, y);
+        y += 6;
+      }
+      y += 1.2;
+    }
+
+    y += 7;
+    if (y > pageHeight - 58) {
+      doc.addPage();
+      y = 22;
+    }
+
+    const signer = resolveCustomLetterSigner(data, settings);
+    const signX = pageWidth - marginX - 66;
+    y = await drawSignatureBlock(doc, {
+      cityAndDate,
+      position: signer.position,
+      principalName: signer.name,
+      principalNip: signer.nip,
+      showNipLine: signer.usesSettings || Boolean(signer.nip),
+      x: signX,
+      startY: y,
+      showAssets: data.showSignatureAssets,
+      ttdImg,
+      stempelImg,
+    });
+
+    if (data.customCc?.trim()) {
+      y += 10;
+      const ccLines = data.customCc
+        .trim()
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .flatMap((line) => doc.splitTextToSize(line || ' ', contentWidth) as string[]);
+      if (y + ccLines.length * 5 > pageHeight - 16) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.setFont('times', 'bold');
+      doc.setFontSize(10.5);
+      doc.text('Tembusan :', marginX, y);
+      const ccW = doc.getTextWidth('Tembusan :');
+      doc.setLineWidth(0.3);
+      doc.line(marginX, y + 0.8, marginX + ccW, y + 0.8);
+      y += 5.2;
+      doc.setFont('times', 'normal');
+      doc.text(ccLines, marginX, y);
+    }
+  } else if (isPindah) {
     drawCenteredUnderlinedTitle(
       doc,
       'SURAT KETERANGAN PINDAH SEKOLAH',
@@ -564,13 +782,18 @@ export async function downloadLetterPdf(
     });
   }
 
-  const safeStudent = (data.studentName || 'siswa')
+  const slugSource = isCustom
+    ? data.customTitle || data.customSubject || 'surat-lain-lain'
+    : data.studentName || 'siswa';
+  const safeSlug = slugSource
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   const prefix = isPindah
     ? 'surat-keterangan-pindah-sekolah'
-    : 'surat-mutasi-keluar';
-  doc.save(`${prefix}-${safeStudent || 'dokumen'}.pdf`);
+    : isCustom
+      ? 'surat-resmi'
+      : 'surat-mutasi-keluar';
+  doc.save(`${prefix}-${safeSlug || 'dokumen'}.pdf`);
 }

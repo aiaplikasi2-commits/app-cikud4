@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Landmark } from 'lucide-react';
 import type { SchoolIdentity } from '../types/settings';
+import { resolveAssetUrl } from '../lib/authApi';
 
 interface SchoolHeaderProps {
   identity?: SchoolIdentity;
@@ -14,7 +15,7 @@ export const SchoolHeader: React.FC<SchoolHeaderProps> = ({
   const [schoolLogoError, setSchoolLogoError] = useState(false);
   const [regionLogoError, setRegionLogoError] = useState(false);
 
-  const effectiveLogoSrc = logoUrl || '/assets/aistudio/logo_1128ead8.png';
+  const effectiveLogoSrc = resolveAssetUrl(logoUrl) || '/assets/aistudio/logo_1128ead8.png';
 
   useEffect(() => {
     setSchoolLogoError(false);

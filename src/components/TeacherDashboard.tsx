@@ -4,12 +4,14 @@ import type { AuthUser, PublicSchoolInfo } from '../types/auth';
 import { SchoolHeader } from './SchoolHeader';
 import { GURU_MENU_ITEMS, MenuGrid, MenuItem } from './MenuGrid';
 import { AdminAvatarIcon } from './MenuIcons';
+import { AgendaDashboardWidget } from './AgendaDashboardWidget';
 
 interface TeacherDashboardProps {
   user: AuthUser;
   school: PublicSchoolInfo;
   selectedMenuId: string | null;
   onSelectMenu: (menu: MenuItem) => void;
+  onOpenAgenda?: (openCreate?: boolean) => void;
   onOpenProfil?: () => void;
   onLogout: () => void;
   loggingOut?: boolean;
@@ -20,6 +22,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   school,
   selectedMenuId,
   onSelectMenu,
+  onOpenAgenda,
   onOpenProfil,
   onLogout,
   loggingOut = false,
@@ -119,6 +122,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         selectedMenuId={selectedMenuId}
         onSelectMenu={onSelectMenu}
       />
+
+      {/* Ringkasan Agenda Harian */}
+      {onOpenAgenda && (
+        <AgendaDashboardWidget userRole="GURU" onOpenAgenda={onOpenAgenda} />
+      )}
     </div>
   );
 };

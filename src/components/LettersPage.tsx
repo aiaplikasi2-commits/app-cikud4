@@ -37,10 +37,12 @@ import {
   createDefaultLetterData,
   formatIndonesianFullDate,
   generateDefaultLetterNumber,
+  resolveCustomLetterSigner,
 } from '../lib/letterHelpers';
 import { downloadLetterPdf } from '../lib/letterPdf';
 import { SuratKeteranganDiterimaPreview } from './SuratKeteranganDiterimaPreview';
 import { SuratPindahSekolahPreview } from './SuratPindahSekolahPreview';
+import { SuratLainLainPreview } from './SuratLainLainPreview';
 import { SuratIcon } from './MenuIcons';
 
 interface LettersPageProps {
@@ -72,6 +74,7 @@ export const LettersPage: React.FC<LettersPageProps> = ({
   const [totalLetters, setTotalLetters] = useState(0);
   const [nextSeq, setNextSeq] = useState(1);
   const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveTypeFilter, setArchiveTypeFilter] = useState<'ALL' | LetterTypeId>('ALL');
   const [loadingArchive, setLoadingArchive] = useState(true);
 
   // Linked student directory for auto-fill
@@ -110,10 +113,12 @@ export const LettersPage: React.FC<LettersPageProps> = ({
   if (!settings.principal.name?.trim()) missingSettingsFields.push('Kepala Sekolah');
 
   const fetchArchive = useCallback(
-    async (searchValue?: string) => {
+    async (searchValue?: string, typeValue?: 'ALL' | LetterTypeId) => {
       setLoadingArchive(true);
+      const effectiveType = typeValue ?? archiveTypeFilter;
       try {
         const res = await listLetters({
+          type: effectiveType === 'ALL' ? undefined : effectiveType,
           search: searchValue ?? '',
         });
         setLetters(res.letters);
@@ -124,7 +129,9 @@ export const LettersPage: React.FC<LettersPageProps> = ({
           if (
             prev.letterNumber.startsWith('421.2/001/') &&
             res.nextSequenceNumber > 1 &&
-            !prev.studentName
+            !prev.studentName &&
+            !prev.customTitle &&
+            !prev.customBody
           ) {
             return {
               ...prev,
@@ -145,12 +152,12 @@ export const LettersPage: React.FC<LettersPageProps> = ({
         setLoadingArchive(false);
       }
     },
-    [editingId, settings.identity.schoolName]
+    [archiveTypeFilter, editingId, settings.identity.schoolName]
   );
 
   useEffect(() => {
-    fetchArchive('');
-  }, [fetchArchive]);
+    fetchArchive('', archiveTypeFilter);
+  }, [fetchArchive, archiveTypeFilter]);
 
   useEffect(() => {
     let active = true;
@@ -172,10 +179,10 @@ export const LettersPage: React.FC<LettersPageProps> = ({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      fetchArchive(archiveSearch);
+      fetchArchive(archiveSearch, archiveTypeFilter);
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [archiveSearch, fetchArchive]);
+  }, [archiveSearch, archiveTypeFilter, fetchArchive]);
 
   useEffect(() => {
     setFormData((prev) => {
@@ -236,30 +243,50 @@ export const LettersPage: React.FC<LettersPageProps> = ({
     }
   };
 
-  const handleResetNewLetter = () => {
+  const handleResetNewLetter = (targetType?: LetterTypeId) => {
+    const effectiveType = targetType ?? selectedType;
     setEditingId(null);
     setErrorMsg(null);
     setSuccessMsg(null);
     setStudentSearch('');
-    setFormData(createDefaultLetterData(settings, nextSeq));
+    const base = createDefaultLetterData(settings, nextSeq);
+    setFormData(
+      effectiveType === 'SURAT_LAIN_LAIN'
+        ? { ...base, paperSize: 'A4' }
+        : base
+    );
   };
 
   const handleSelectType = (nextType: LetterTypeId) => {
     setSelectedType(nextType);
-    if (!editingId && nextType === 'SUKET_SISWA_DITERIMA' && formData.studentId) {
-      setStudentSearch('');
-      setFormData((prev) => ({
-        ...prev,
-        studentId: null,
-        studentName: '',
-        birthPlace: '',
-        birthDate: '',
-        gender: 'Laki - Laki',
-        religion: 'Islam',
-        address: '',
-        originSchool: '',
-        targetClass: '',
-      }));
+    setErrorMsg(null);
+    if (!editingId) {
+      setFormData((prev) => {
+        const next = { ...prev };
+        if (nextType === 'SUKET_SISWA_DITERIMA' && next.studentId) {
+          setStudentSearch('');
+          next.studentId = null;
+          next.studentName = '';
+          next.birthPlace = '';
+          next.birthDate = '';
+          next.gender = 'Laki - Laki';
+          next.religion = 'Islam';
+          next.address = '';
+          next.originSchool = '';
+          next.targetClass = '';
+        }
+        if (
+          nextType === 'SURAT_LAIN_LAIN' &&
+          next.paperSize === 'F4' &&
+          !next.customTitle &&
+          !next.customBody
+        ) {
+          next.paperSize = 'A4';
+        } else if (nextType === 'SUKET_PINDAH_SEKOLAH' && next.paperSize === 'A4') {
+          next.paperSize = 'F4';
+        }
+        return next;
+      });
     }
   };
 
@@ -284,7 +311,16 @@ export const LettersPage: React.FC<LettersPageProps> = ({
       setErrorMsg('Nomor surat wajib diisi.');
       return null;
     }
-    if (!formData.studentName.trim()) {
+    if (selectedType === 'SURAT_LAIN_LAIN') {
+      if (!formData.customTitle.trim()) {
+        setErrorMsg('Judul surat wajib diisi.');
+        return null;
+      }
+      if (!formData.customBody.trim()) {
+        setErrorMsg('Isi surat wajib diisi.');
+        return null;
+      }
+    } else if (!formData.studentName.trim()) {
       setErrorMsg('Nama siswa wajib diisi.');
       return null;
     }
@@ -296,13 +332,16 @@ export const LettersPage: React.FC<LettersPageProps> = ({
         : await createLetter({ type: selectedType, data: formData });
 
       setEditingId(saved.id);
-      setFormData({ ...saved.data });
+      setFormData({
+        ...createDefaultLetterData(settings, nextSeq),
+        ...saved.data,
+      });
       setSuccessMsg(
         editingId
           ? `Surat ${saved.letterNumber} diperbarui.`
           : `Surat ${saved.letterNumber} tersimpan.`
       );
-      await fetchArchive(archiveSearch);
+      await fetchArchive(archiveSearch, archiveTypeFilter);
       return saved;
     } catch (err) {
       setErrorMsg(
@@ -342,7 +381,7 @@ export const LettersPage: React.FC<LettersPageProps> = ({
       }
       setSuccessMsg(`Arsip ${deleteTarget.letterNumber} dihapus.`);
       setDeleteTarget(null);
-      await fetchArchive(archiveSearch);
+      await fetchArchive(archiveSearch, archiveTypeFilter);
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Gagal menghapus arsip.'
@@ -357,7 +396,15 @@ export const LettersPage: React.FC<LettersPageProps> = ({
       ? formData.paperSize === 'LEGAL'
         ? 'Legal'
         : 'F4'
-      : 'A4';
+      : selectedType === 'SURAT_LAIN_LAIN'
+        ? formData.paperSize === 'LEGAL'
+          ? 'Legal'
+          : formData.paperSize === 'F4'
+            ? 'F4'
+            : 'A4'
+        : 'A4';
+
+  const resolvedCustomSigner = resolveCustomLetterSigner(formData, settings);
 
   return (
     <div className="pt-4 sm:pt-6 space-y-4">
@@ -512,7 +559,7 @@ export const LettersPage: React.FC<LettersPageProps> = ({
               {editingId && (
                 <button
                   type="button"
-                  onClick={handleResetNewLetter}
+                  onClick={() => handleResetNewLetter()}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-bold text-[#1D63D8] whitespace-nowrap cursor-pointer"
                 >
                   <FilePlus2 className="w-3.5 h-3.5" />
@@ -521,7 +568,7 @@ export const LettersPage: React.FC<LettersPageProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {LETTER_TYPE_REGISTRY.map((item) => {
                 const isSelected = selectedType === item.id;
                 return (
@@ -537,6 +584,9 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                   >
                     <p className="text-xs sm:text-sm font-extrabold text-[#17325C]">
                       {item.title}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                      {item.description}
                     </p>
                   </button>
                 );
@@ -764,7 +814,8 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                 />
               </div>
 
-              {selectedType === 'SUKET_PINDAH_SEKOLAH' && (
+              {(selectedType === 'SUKET_PINDAH_SEKOLAH' ||
+                selectedType === 'SURAT_LAIN_LAIN') && (
                 <div>
                   <label
                     htmlFor="letter-paper-size"
@@ -783,6 +834,9 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                     }
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
                   >
+                    {selectedType === 'SURAT_LAIN_LAIN' && (
+                      <option value="A4">A4 (210 x 297 mm)</option>
+                    )}
                     <option value="F4">F4 (215 x 330 mm)</option>
                     <option value="LEGAL">Legal (215,9 x 355,6 mm)</option>
                   </select>
@@ -790,8 +844,335 @@ export const LettersPage: React.FC<LettersPageProps> = ({
               )}
             </div>
 
-            {/* Data Siswa & Form Spesifik Jenis Surat */}
-            {selectedType === 'SUKET_PINDAH_SEKOLAH' ? (
+            {/* Form Spesifik Jenis Surat */}
+            {selectedType === 'SURAT_LAIN_LAIN' ? (
+              <div className="pt-3 border-t border-slate-100 space-y-4">
+                {/* Banner Sinkronisasi Pengaturan */}
+                <div className="rounded-xl border border-blue-200/80 bg-blue-50/50 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-slate-700 space-y-0.5">
+                    <p className="font-extrabold text-[#17325C]">
+                      Format &amp; Identitas Otomatis Tersinkron dengan Pengaturan
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      Kop:{' '}
+                      <strong>
+                        {settings.files.kop?.url
+                          ? 'Gambar Kop Terpasang'
+                          : 'Otomatis Logo + Identitas Sekolah'}
+                      </strong>{' '}
+                      · Logo:{' '}
+                      <strong>
+                        {settings.files.logo?.url ? 'Ada' : 'Belum diunggah'}
+                      </strong>{' '}
+                      · TTD &amp; Stempel:{' '}
+                      <strong>
+                        {settings.files.ttd?.url || settings.files.stempel?.url
+                          ? 'Terpasang'
+                          : 'Belum diunggah'}
+                      </strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onNavigateSettings}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white hover:bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-[#1D63D8] whitespace-nowrap cursor-pointer"
+                  >
+                    <SettingsIcon className="w-3.5 h-3.5" />
+                    Ubah di Pengaturan
+                  </button>
+                </div>
+
+                {/* Judul, Lampiran, Perihal & Tujuan */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="custom-letter-title"
+                      className="block text-xs font-bold text-slate-700 mb-1"
+                    >
+                      Judul Surat *
+                    </label>
+                    <input
+                      id="custom-letter-title"
+                      type="text"
+                      list="custom-letter-title-suggestions"
+                      value={formData.customTitle}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          customTitle: e.target.value,
+                        }))
+                      }
+                      placeholder="Contoh: SURAT PEMBERITAHUAN / SURAT UNDANGAN / SURAT TUGAS"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                    <datalist id="custom-letter-title-suggestions">
+                      <option value="SURAT PEMBERITAHUAN" />
+                      <option value="SURAT UNDANGAN" />
+                      <option value="SURAT TUGAS" />
+                      <option value="SURAT EDARAN" />
+                      <option value="SURAT KETERANGAN" />
+                      <option value="SURAT PERMOHONAN" />
+                      <option value="SURAT PERNYATAAN" />
+                    </datalist>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="custom-letter-subject"
+                      className="block text-xs font-bold text-slate-700 mb-1"
+                    >
+                      Perihal (Opsional)
+                    </label>
+                    <input
+                      id="custom-letter-subject"
+                      type="text"
+                      value={formData.customSubject}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          customSubject: e.target.value,
+                        }))
+                      }
+                      placeholder="Contoh: Undangan Rapat Wali Murid"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="custom-letter-attachment"
+                      className="block text-xs font-bold text-slate-700 mb-1"
+                    >
+                      Lampiran (Opsional)
+                    </label>
+                    <input
+                      id="custom-letter-attachment"
+                      type="text"
+                      value={formData.customAttachment}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          customAttachment: e.target.value,
+                        }))
+                      }
+                      placeholder="Contoh: - atau 1 (Satu) Berkas"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="custom-letter-recipient"
+                      className="block text-xs font-bold text-slate-700 mb-1"
+                    >
+                      Tujuan Surat / Kepada Yth. (Opsional)
+                    </label>
+                    <textarea
+                      id="custom-letter-recipient"
+                      rows={2}
+                      value={formData.customRecipient}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          customRecipient: e.target.value,
+                        }))
+                      }
+                      placeholder={"Contoh:\nBapak/Ibu Orang Tua / Wali Murid Kelas I - VI\ndi Tempat"}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Isi Surat Bebas */}
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label
+                      htmlFor="custom-letter-body"
+                      className="block text-xs font-bold text-slate-700"
+                    >
+                      Isi Surat *
+                    </label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            customBody: prev.customBody.trim()
+                              ? `Dengan hormat,\n\n${prev.customBody}`
+                              : 'Dengan hormat,\n\nSehubungan dengan ...',
+                          }))
+                        }
+                        className="rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                      >
+                        + Salam Pembuka
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            customBody: prev.customBody.trim()
+                              ? `${prev.customBody.replace(/\s+$/, '')}\n\nDemikian surat ini kami sampaikan. Atas perhatian dan kerja samanya kami ucapkan terima kasih.`
+                              : 'Demikian surat ini kami sampaikan. Atas perhatian dan kerja samanya kami ucapkan terima kasih.',
+                          }))
+                        }
+                        className="rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                      >
+                        + Penutup Resmi
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    id="custom-letter-body"
+                    rows={10}
+                    value={formData.customBody}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        customBody: e.target.value,
+                      }))
+                    }
+                    placeholder="Ketik isi surat secara bebas di sini. Gunakan baris kosong untuk memisahkan paragraf..."
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-900 leading-relaxed focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Tips: Tekan Enter dua kali untuk membuat jarak antar paragraf secara rapi pada pratinjau &amp; PDF.
+                  </p>
+                </div>
+
+                {/* Penandatangan Surat (Otomatis Pengaturan atau Custom) */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                      Penandatangan Surat
+                    </h3>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#17325C] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.customUseSettingsSigner !== false}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            customUseSettingsSigner: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 rounded border-slate-300 text-[#1D63D8] focus:ring-blue-600"
+                      />
+                      Otomatis dari Pengaturan Kepala Sekolah
+                    </label>
+                  </div>
+
+                  {formData.customUseSettingsSigner !== false ? (
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="text-slate-500">
+                          {resolvedCustomSigner.position}:
+                        </span>{' '}
+                        <strong className="text-[#17325C]">
+                          {resolvedCustomSigner.name}
+                        </strong>{' '}
+                        <span className="text-slate-500">
+                          (NIP. {resolvedCustomSigner.nip || '—'})
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-semibold text-emerald-700">
+                        Mengikuti Pengaturan Terbaru
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label
+                          htmlFor="custom-signer-position"
+                          className="block text-xs font-bold text-slate-700 mb-1"
+                        >
+                          Jabatan Penandatangan
+                        </label>
+                        <input
+                          id="custom-signer-position"
+                          type="text"
+                          value={formData.customSignerPosition}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              customSignerPosition: e.target.value,
+                            }))
+                          }
+                          placeholder={settings.principal.position || 'Kepala Sekolah'}
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="custom-signer-name"
+                          className="block text-xs font-bold text-slate-700 mb-1"
+                        >
+                          Nama Penandatangan
+                        </label>
+                        <input
+                          id="custom-signer-name"
+                          type="text"
+                          value={formData.customSignerName}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              customSignerName: e.target.value,
+                            }))
+                          }
+                          placeholder={settings.principal.name || 'Nama lengkap & gelar'}
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="custom-signer-nip"
+                          className="block text-xs font-bold text-slate-700 mb-1"
+                        >
+                          NIP (Opsional)
+                        </label>
+                        <input
+                          id="custom-signer-nip"
+                          type="text"
+                          value={formData.customSignerNip}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              customSignerNip: e.target.value,
+                            }))
+                          }
+                          placeholder="Kosongkan jika tidak ada NIP"
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tembusan / Catatan Tambahan */}
+                <div>
+                  <label
+                    htmlFor="custom-letter-cc"
+                    className="block text-xs font-bold text-slate-700 mb-1"
+                  >
+                    Tembusan / Catatan Kaki (Opsional)
+                  </label>
+                  <textarea
+                    id="custom-letter-cc"
+                    rows={2}
+                    value={formData.customCc}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        customCc: e.target.value,
+                      }))
+                    }
+                    placeholder={"Contoh:\n1. Pengawas Sekolah Dasar\n2. Arsip"}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                  />
+                </div>
+              </div>
+            ) : selectedType === 'SUKET_PINDAH_SEKOLAH' ? (
               <div className="pt-3 border-t border-slate-100 space-y-3">
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
                   Data Siswa &amp; Tujuan Pindah
@@ -1321,6 +1702,8 @@ export const LettersPage: React.FC<LettersPageProps> = ({
             <div className="overflow-x-auto pb-2 print:overflow-visible print:pb-0">
               {selectedType === 'SUKET_PINDAH_SEKOLAH' ? (
                 <SuratPindahSekolahPreview data={formData} settings={settings} />
+              ) : selectedType === 'SURAT_LAIN_LAIN' ? (
+                <SuratLainLainPreview data={formData} settings={settings} />
               ) : (
                 <SuratKeteranganDiterimaPreview
                   data={formData}
@@ -1333,17 +1716,30 @@ export const LettersPage: React.FC<LettersPageProps> = ({
       ) : (
         /* Tab Arsip Surat */
         <div className="print-hidden space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="search"
                 value={archiveSearch}
                 onChange={(e) => setArchiveSearch(e.target.value)}
-                placeholder="Cari nomor surat atau nama siswa..."
+                placeholder="Cari nomor surat, judul, perihal, tujuan, atau nama siswa..."
                 className="w-full rounded-xl border border-slate-300 bg-slate-50/70 focus:bg-white pl-10 pr-3.5 py-2 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
               />
             </div>
+            <select
+              aria-label="Filter jenis surat"
+              value={archiveTypeFilter}
+              onChange={(e) =>
+                setArchiveTypeFilter(e.target.value as 'ALL' | LetterTypeId)
+              }
+              className="rounded-xl border border-slate-300 bg-slate-50/70 focus:bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-700 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+            >
+              <option value="ALL">Semua Jenis</option>
+              <option value="SUKET_SISWA_DITERIMA">Ket. Diterima</option>
+              <option value="SUKET_PINDAH_SEKOLAH">Pindah Sekolah</option>
+              <option value="SURAT_LAIN_LAIN">Surat Lain-lain</option>
+            </select>
             <button
               type="button"
               onClick={() => {
@@ -1379,8 +1775,8 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                       <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
                         <th className="px-4 py-3">Jenis</th>
                         <th className="px-4 py-3">Nomor Surat</th>
-                        <th className="px-4 py-3">Nama Siswa</th>
-                        <th className="px-4 py-3">Kelas</th>
+                        <th className="px-4 py-3">Tujuan / Nama Siswa</th>
+                        <th className="px-4 py-3">Keterangan / Kelas</th>
                         <th className="px-4 py-3">Tanggal</th>
                         <th className="px-4 py-3 text-right">Aksi</th>
                       </tr>
@@ -1394,16 +1790,25 @@ export const LettersPage: React.FC<LettersPageProps> = ({
                           <td className="px-4 py-3 text-xs font-semibold text-slate-600">
                             {l.type === 'SUKET_PINDAH_SEKOLAH'
                               ? 'Pindah Sekolah'
-                              : 'Ket. Diterima'}
+                              : l.type === 'SURAT_LAIN_LAIN'
+                                ? 'Surat Lain-lain'
+                                : 'Ket. Diterima'}
                           </td>
                           <td className="px-4 py-3 font-mono text-xs font-semibold text-[#17325C]">
                             {l.letterNumber}
                           </td>
                           <td className="px-4 py-3 font-bold text-slate-900">
-                            {l.recipientName}
+                            <div>{l.recipientName}</div>
+                            {l.type === 'SURAT_LAIN_LAIN' && (
+                              <div className="text-[11px] font-semibold text-slate-500">
+                                {l.title}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 font-semibold text-slate-800">
-                            {l.data.targetClass || '—'}
+                            {l.type === 'SURAT_LAIN_LAIN'
+                              ? l.data.customSubject || '—'
+                              : l.data.targetClass || '—'}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             {formatIndonesianFullDate(l.letterDate) || '—'}
@@ -1454,9 +1859,13 @@ export const LettersPage: React.FC<LettersPageProps> = ({
 
                     <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 rounded-xl p-2.5 border border-slate-100">
                       <div>
-                        <span className="text-slate-500 block">Kelas</span>
+                        <span className="text-slate-500 block">
+                          {l.type === 'SURAT_LAIN_LAIN' ? 'Perihal' : 'Kelas'}
+                        </span>
                         <span className="font-semibold text-slate-800">
-                          {l.data.targetClass || '—'}
+                          {l.type === 'SURAT_LAIN_LAIN'
+                            ? l.data.customSubject || '—'
+                            : l.data.targetClass || '—'}
                         </span>
                       </div>
                       <div>
